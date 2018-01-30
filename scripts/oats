@@ -314,8 +314,6 @@ if __name__ == '__main__':
 
     #Apply any arg options as overrides of the loaded config file
     bconf = merge_conf(args, config['OATS'])
-    print(bconf)
-    sys.exit(0)
 
     processes = None if bconf['--processes'] == '0' else int(bconf['processes'])
 
