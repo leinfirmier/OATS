@@ -23,6 +23,7 @@ Options:
   -t --torrent-dir=<dir>   A directory path where torrent files will be put.
   -T --torrent-enabled     Set this option to enable torrent creation.
   -c --config=<conf-file>  Specify a configuration file to use.
+  -s --source=<str>        An identifier string used by some trackers. 
   -h --help                Show this screen.
   --version                Show version.
 
@@ -167,8 +168,8 @@ def initialize_configuration(config):
                       '--formats': '320,V0',
                       '--torrent-enabled': 'False',
                       '--torrent-dir': '.',
-                      '--announce-url': 'None'
-                      }
+                      '--announce-url': 'None',
+                      '--source': 'None'}
 
 def merge_conf(conf1, conf2):
     """
@@ -179,7 +180,7 @@ def merge_conf(conf1, conf2):
                 for key in set(conf2) | set(conf1))
 
 
-def make_torrent(target, announce_url, torrent_dir):
+def make_torrent(target, announce_url, source, torrent_dir):
     base = os.path.basename(target)
     torrent_output = os.path.abspath(os.path.join(torrent_dir, base + '.torrent'))
     if os.path.isfile(torrent_output):
@@ -187,7 +188,7 @@ def make_torrent(target, announce_url, torrent_dir):
     cwd = os.getcwd()
     rebase = os.chdir(os.path.split(target)[0])
     target = os.path.split(target)[1]
-    oats.maketorrent.mktorrent(target, torrent_output, tracker=announce_url)
+    oats.maketorrent.mktorrent(target, torrent_output, tracker=announce_url, source=source)
     os.chdir(cwd)
 
 def command_substitute(command, **kwargs):
@@ -315,7 +316,8 @@ if __name__ == '__main__':
     #Apply any arg options as overrides of the loaded config file
     bconf = merge_conf(args, config['OATS'])
 
-    processes = None if bconf['--processes'] == '0' else int(bconf['processes'])
+    bconf['--processes'] = None if bconf['--processes'] == '0' else int(bconf['processes'])
+    bconf['--source'] = None if bconf['--source'] == 'None' else bconf['--source']
 
     #Make torrent output directory if necessary
     if not os.path.isdir(bconf['--torrent-dir']):
@@ -324,7 +326,8 @@ if __name__ == '__main__':
     #If mktorrent command in use, then make torrent files for the targets and quit
     if args['mktorrent']:
         for t in bconf['<target>']:
-            make_torrent(t, bconf['--announce-url'], bconf['--torrent-dir'])
+            t = os.path.abspath(t)
+            make_torrent(t, bconf['--announce-url'], bconf['--source'], bconf['--torrent-dir'])
         sys.exit(0)
 
     #Make torrent output directory if necessary
@@ -335,13 +338,16 @@ if __name__ == '__main__':
     torrent_enabled = True if bconf['--torrent-enabled'].lower() in ['true', '1'] else False
 
     #Process the source targets for transcodes
-    with ThreadPool(processes) as p:
+    with ThreadPool(bconf['--processes']) as p:
         print('Transcoding!')
         p.map(task_caller, iter_targets(bconf))
     print('Transcoding done!')
 
     #Make torrents if enabled and there is an announce announce_url
     if torrent_enabled and bconf['--announce-url'] not in ['', 'None']:
-        with Pool(processes) as p:
+        with Pool(bconf['--processes']) as p:
             print('Making Torrents!')
-            p.starmap(make_torrent, [(t, bconf['--announce-url'], bconf['--torrent-dir']) for t in iter_destinations(bconf)])
+            p.starmap(make_torrent, [(t,
+                                      bconf['--announce-url'],
+                                      bconf['--source'],
+                                      bconf['--torrent-dir']) for t in iter_destinations(bconf)])
