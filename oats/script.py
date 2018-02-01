@@ -38,8 +38,7 @@ Generate a baseline configuration file
 
 #Non-Standard Libs
 from docopt import docopt
-import oats.maketorrent
-from oats import __version__
+from . import maketorrent, __version__
 # import mutagen  # Looks like mutagen is not even needed for ffmpeg versions >= 3.2
 
 
@@ -188,7 +187,7 @@ def make_torrent(target, announce_url, source, torrent_dir):
     cwd = os.getcwd()
     rebase = os.chdir(os.path.split(target)[0])
     target = os.path.split(target)[1]
-    oats.maketorrent.mktorrent(target, torrent_output, tracker=announce_url, source=source)
+    maketorrent.mktorrent(target, torrent_output, tracker=announce_url, source=source)
     os.chdir(cwd)
 
 def command_substitute(command, **kwargs):
@@ -290,7 +289,8 @@ def iter_destinations(config):
         for v in mapping.values():
             yield v
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
+def main():
     args = docopt(__doc__, version=__version__)
 
     #Set up a ConfigParser object
