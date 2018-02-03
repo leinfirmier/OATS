@@ -65,7 +65,7 @@ class Task(object):
         self.commands = commands
     def __call__(self):
         for command in self.commands:
-            if command[0] == COPY:
+            if platform.system() == 'Windows' and command[0] == COPY:
                 shell = True
             else:
                 shell = False
