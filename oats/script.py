@@ -138,6 +138,7 @@ CODECS = {
     'alac',  # ALAC
     'aac 256', 'aac 128',  # AACs with CBR mode
     'aac v1', 'aac v2','aac v3', 'aac v4', 'aac v5',  # AACs with VBR mode (5 is best)
+    'aac v0.1', 'aac v1.0', 'aac v2.0',  # AACs with VBR for built-in aac encoder
     '320', '256', '224', '192',  # MP3s with CBR mode
     'v0', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7',  'v8',  # MP3s with VBR mode (0 is best)
     '256 abr', '224 abr', '192 abr'  # MP3s with ABR mode
