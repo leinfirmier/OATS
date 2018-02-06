@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
-#
-#  bencode.py
-#
-
+"""
+Bencoding for OATS
+"""
 
 def bencode_bytes(var):
     return str(len(var)).encode() + b':' + var
@@ -50,13 +48,3 @@ def Bencode(var):
 
     return varfunc[vartype](var)
 
-
-def main():
-    print(Bencode({'z': ['héhé', 123, True], 'a': 'foo', 'x': b'\x01\xff'}))
-
-    return 0
-
-
-if __name__ == '__main__':
-    import sys
-    sys.exit(main())
