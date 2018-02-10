@@ -304,11 +304,20 @@ def iter_targets(config):
             yield task
 
 
+import traceback
 def task_caller(task):
     try:
         task()
     except Exception as e:
-        print('ERROR: {}'.format(e))
+        print('Caught exception in worker thread (x = %d):' % x)
+
+        # This prints the type, value, and stack trace of the
+        # current exception being handled.
+        traceback.print_exc()
+
+        print()
+        raise e
+        #print('ERROR: {}'.format(e))
 
 
 def format_destinations(source, config):
