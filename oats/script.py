@@ -397,6 +397,7 @@ def main():
     bconf['--source'] = None if bconf['--source'] == 'None' else bconf['--source']
     bconf['--torrent'] = True if bconf['--torrent'].lower() in ['1','t','true'] else False
     bconf['--formats'] = [fmt.lower() for fmt in bconf['--formats'].split(',')]
+    bconf['--list-file'] = True if bconf['--list-file'] in [True, 'true', 'True'] else False
 
     #Apply a check for format existence in transcode_commands. If it does not
     #exist there, then OATS does not know how to transcode to it

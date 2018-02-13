@@ -1,14 +1,9 @@
 # OATS
 OATS is Another Transcoding Script
 
-It exists for make it easy to transcode your lossless audio media to lossy
-versions. It has a simple commandline interface and works with config file.
-OATS is cross-platform.
-
-OATS is easy to install and has few dependencies, namely:
-
- * ffmpeg
- * Python3
+OATS is a commandline tool that makes transcoding easy on Windows, Linux, or Mac.
+The only prerequisites for OATS are FFmpeg and Python3. It can also make
+torrents.
 
 ## A quick intro
 
