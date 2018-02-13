@@ -1,39 +1,38 @@
 """OATS
 
-OATS is a cross-platform commandline tool for the transcoding of audio albums.
-Capable also of making torrent files for target albums and trancoded albums.
+OATS is a commandline tool for easy transcoding of audio albums. It effectively
+parallelizes transcodes, is cross-platform, and makes torrents if directed.
 
 Usage:
   oats mkconfig [<file>]
   oats mktorrent [options] <target> ...
   oats [options] <target> ...
-  oats (-h | --help)
-  oats --version
+  oats (--help | --version | --show-formats)
 
 Options:
+  -c --config=<conf-file>  Specify a configuration file to use.
+  -f --formats=<fmt-list>  A comma-separated list of formats to target for
+                           transcoding, like "320,V0,V2".
+  -o --output-dir=<dir>    A directory path where transcodes will be put.
   -p --processes=<count>   Set the number of processes to employ. A value of 0
                            will set equivalent to number of CPU cores. Useful
                            for throttling or if autodetection is incorrect.
-  -f --formats=<fmt-list>  A comma-separated list of formats to target for
-                           transcoding, like "320,V0,V2".
-  -a --announce-url=<url>  Set an announce url for torrent creation.
-  -o --output-dir=<dir>    A directory path where transcodes will be put.
-  -t --torrent-dir=<dir>   A directory path where torrent files will be put.
-  -T --torrent=<bool>      Set this option to toggle whether to automatically
-                           create torrents of transcodes. Expects values to be
-                           in {1, 0, True, False, t, f} case insensitive,
-  -c --config=<conf-file>  Specify a configuration file to use.
-  -s --source=<str>        An identifier string used by some trackers.
+  -l --list-file           Process targets as list files, each line of the file
+                           containing a path to a directory to be transcoded.
+  -F --show-formats        Print out the list of formats known to OATS.
   -h --help                Show this screen.
   -v --version             Show version.
 
-Arguments:
-  <conf-file>
-
-Examples:
-
-Generate a baseline configuration file
-  oats mkconfig
+Torrent Options:
+  -T --torrent=<bool>      Set this option to toggle whether to torrents should
+                           be created for transcode outputs. Ignored by
+                           mktorrent subcommand. Boolean-ish values expected to
+                           enable: one of {1. True, t}, others will disable.
+  -a --announce-url=<url>  Set an announce url for torrent creation. This is
+                           required for torrent creation.
+  -t --torrent-dir=<dir>   A directory path where torrent files will be placed.
+  -s --source=<str>        A special short identifier string used by some
+                           trackers to help cross-seeding.
 """
 
 #Non-Standard Libs
@@ -44,7 +43,6 @@ from . import maketorrent, __version__
 from configparser import ConfigParser, ExtendedInterpolation
 from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
-import multiprocessing
 import os
 import platform
 import re
@@ -64,11 +62,15 @@ class Task(object):
                 shell = True
             else:
                 shell = False
-            _c = subprocess.run(command,
-                                stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                shell=shell)
+            try:
+                subprocess.check_call(command,
+                                      stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL,
+                                      shell=shell)
+            except subprocess.CalledProcessError as e:
+                print('{} reports an error: code {}'.format(e.cmd, e.returncode))
+
     def __repr__(self):
         fmt = 'Task:\n'
         for command in self.commands:
@@ -93,6 +95,7 @@ transcode_commands = {
     '16-44'  : _ffmpeg + ['-i', '{inpt}', '-c:a', 'flac', '-sample_fmt', 's16', '-ar', '44100', '{outpt}'],
     'alac'   : _ffmpeg + ['-i', '{inpt}', '-c:a', 'alac', '{outpt}'],  # TODO: research  ALAC encoder for options
     'aac 256': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '256k', '{outpt}'],
+    'aac 192': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '192k', '{outpt}'],
     'aac 128': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '128k', '{outpt}'],
     '320'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '320k', '-compression_level', '0' ,'{outpt}'],
     '256'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '256k', '-compression_level', '0' ,'{outpt}'],
@@ -107,12 +110,14 @@ transcode_commands = {
     'v6'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '6', '-compression_level', '0', '{outpt}'],
     'v7'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '7', '-compression_level', '0', '{outpt}'],
     'v8'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '8', '-compression_level', '0', '{outpt}'],
+    'v9'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '9', '-compression_level', '0', '{outpt}'],
     '256 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '256k', '--abr', '1', '-compression_level', '0', '{outpt}'],
     '224 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '224k', '--abr', '1', '-compression_level', '0', '{outpt}'],
     '192 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '192k', '--abr', '1', '-compression_level', '0', '{outpt}'],
 }
 
 if AAC_ENCODER == 'aac':
+    #TODO: Discover what set of aac vbr quality values are actually desirous
     transcode_commands['aac v0.1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '0.1', '{outpt}']
     transcode_commands['aac v1.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '1.0', '{outpt}']
     transcode_commands['aac v2.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-g:a', '2.0', '{outpt}']
@@ -123,7 +128,7 @@ elif AAC_ENCODER == 'libfdk_aac':
     transcode_commands['aac v4'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '4', '{outpt}']
     transcode_commands['aac v5'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '5', '{outpt}']
 else:
-    raise InvalidConfiguration('Invalid encoder for AAC set: {}'.format(AAC_ENCODER))
+    raise InvalidConfiguration('Invalid encoder for AAC: {}'.format(AAC_ENCODER))
 
 #File extension codec classification sets
 #NB: .m4a may contain either lossless or lossy encoding, beware
@@ -136,7 +141,7 @@ CODECS = {
     'flac', 'flac 24bit', 'flac 16-44', 'flac 16-48', 'flac 24-44', 'flac 24-48', 'flac 24-96', 'flac 24-196',  # FLACs
     '16-44', '16-48', '24-44', '24-48', '24-96', '24-196',  # Also FLACs
     'alac',  # ALAC
-    'aac 256', 'aac 128',  # AACs with CBR mode
+    'aac 256', 'aac 192', 'aac 128',  # AACs with CBR mode
     'aac v1', 'aac v2','aac v3', 'aac v4', 'aac v5',  # AACs with VBR mode (5 is best)
     'aac v0.1', 'aac v1.0', 'aac v2.0',  # AACs with VBR for built-in aac encoder
     '320', '256', '224', '192',  # MP3s with CBR mode
@@ -151,6 +156,7 @@ CODEC_EXTENSIONS = {
     '16-44'  : '.flac',
     'alac'   : '.m4a',
     'aac 256': '.m4a',
+    'aac 192': '.m4a',
     'aac 128': '.m4a',
     'aac v1' : '.m4a',
     'aac v2' : '.m4a',
@@ -170,6 +176,7 @@ CODEC_EXTENSIONS = {
     'v6'     : '.mp3',
     'v7'     : '.mp3',
     'v8'     : '.mp3',
+    'v9'     : '.mp3',
 }
 
 
@@ -177,12 +184,13 @@ def resolve_configuration(arg_config_file, config):
     """Implementation for the location of configuration files."""
     #Use the config file path given
     if arg_config_file is not None:
-        if os.path.isfile(arg_config_file):
-            with open(arg_config_file, 'r') as conf_file:
+        conf_filepath = os.path.abspath(os.path.expanduser(arg_config_file))
+        if os.path.isfile(conf_filepath):
+            with open(conf_filepath, 'r') as conf_file:
                 config.read_file(conf_file)
             return
         else:
-            raise ValueError('{} does not exist or is a directory'.format(arg_config_file))
+            raise ValueError('The file specified for config does not exist: {}'.format(arg_config_file))
 
     #If a config file was not supplied, check for it in the following locations:
     #  ./oats.conf
@@ -212,9 +220,9 @@ def resolve_configuration(arg_config_file, config):
 def initialize_configuration(config):
     """Provides the baseline of configurable options"""
     config['OATS'] = {'--processes': '0',
-                      '--transcode-enabled' : 'True',
                       '--output-dir': '.',
                       '--formats': '320,V0',
+                      '--list-file': 'False',
                       '--torrent': 'False',
                       '--torrent-dir': '.',
                       '--announce-url': 'None',
@@ -297,27 +305,32 @@ def traverse_target(target, config):
 
 
 def iter_targets(config):
-    """Simple iterating over targets"""
-    for target in config['<target>']:
-        print('Processing {} for transcoding'.format(target))
-        for task in traverse_target(os.path.abspath(target), config):
-            yield task
+    """Iterating over targets"""
+    if config['--list-file']:
+        for listfile in config['<target>']:
+            print('Processing listfile: {}'.format(listfile))
+            with open(listfile, 'r') as lf:
+                for target_line in lf:
+                    if target_line.startswith('#'):  # Allows comment lines starting with "#"
+                        continue
+                    target = target_line.rstrip()
+                    if target == '':
+                        continue
+                    print('Processing {} for transcoding'.format(target))
+                    for task in traverse_target(os.path.abspath(target), config):
+                        yield task
+    else:
+        for target in config['<target>']:
+            print('Processing {} for transcoding'.format(target))
+            for task in traverse_target(os.path.abspath(target), config):
+                yield task
 
 
-import traceback
 def task_caller(task):
     try:
         task()
     except Exception as e:
-        print('Caught exception in worker thread (x = %d):' % x)
-
-        # This prints the type, value, and stack trace of the
-        # current exception being handled.
-        traceback.print_exc()
-
-        print()
-        raise e
-        #print('ERROR: {}'.format(e))
+        print('ERROR: {}'.format(e))
 
 
 def format_destinations(source, config):
@@ -353,6 +366,12 @@ def iter_destinations(config):
 def main():
     args = docopt(__doc__, version=__version__)
 
+    if args['--show-formats']:
+        print('OATS currently has transcode commands for the following format strings')
+        for format in transcode_commands:
+            print(' ' + format.upper())
+        sys.exit(0)
+
     #Set up a ConfigParser object
     config = ConfigParser(interpolation=ExtendedInterpolation())
     initialize_configuration(config)  # baseline configuration load
@@ -368,9 +387,6 @@ def main():
         else:
             raise FileExistsError('{} already exists!'.format(args['<file>']))
 
-    #Check for configuration files
-    if args['--config'] is not None and not os.path.isfile(args['--config']):
-        print('WARNING: The supplied value for --config is not valid')
     resolve_configuration(args['--config'], config)
 
     #Apply any arg options as overrides of the loaded config file
