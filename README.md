@@ -26,14 +26,24 @@ To see the options for `oats`, do the following:
 
   `oats -h`
 
-Here's a sample command for transcoding two albums to MP3 320 and MP3 V2, the 
+Here's a sample command for transcoding two albums to MP3 320 and MP3 V2, the
 resulting files will be put into a directory named `transcodes`:
 
   `oats --output-dir transcodes --formats 320,V2 Album1 Album2`
 
 If you want to enable torrent creation, you can set the following options:
 
-  `oats --torrent-enabled --torrent-dir torrents --announce-url https://blah.com MyAlbum`
+  `oats --torrent true --torrent-dir torrents --announce-url https://blah.com MyAlbum`
 
 All options not supplied to the command line will use their values set in the
 config file.
+
+## TODO - Things I want to do that are not yet done
+
+ * Refine ALAC support
+ * Provide Vorbis support
+ * Provide Opus support
+ * Maybe provide options for channel operations, stereo -> mono is popular bitate
+   conservation method for audiobooks
+ * Possibly provide workaround for Windows Powershell tab-completion bug
+ * Support magnet links
