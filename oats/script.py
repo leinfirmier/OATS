@@ -66,13 +66,13 @@ class Task(object):
 
     def __call__(self):
         for command in self.commands:
-            if platform.system() == 'Windows' and command[0] == COPY:
+            if platform.system() == 'Windows' and command[0] in [COPY, RM]:
                 shell = True
             else:
                 shell = False
             try:
-                if shell:
-                    command = ' '.join(shlex.quote(w) for w in command)
+                if shell and platform.system() != 'Windows':
+                    command = ' '.join([shlex.quote(w) for w in command])
                 subprocess.check_call(command,
                                       stdin=subprocess.DEVNULL,
                                       stdout=subprocess.DEVNULL,
@@ -150,50 +150,6 @@ format_codec_map_full = {
     'MP3':  [codec.LAME, codec.FFmpegMP3],
     'FLAC': [codec.FFmpegFLAC],
 }
-#Used for string matching, and should correspond to keys in transcode_commands
-#CODECS = {
-    #'wav',  # The almighty WAV
-    #'flac', 'flac 24bit', 'flac 16-44', 'flac 16-48', 'flac 24-44', 'flac 24-48', 'flac 24-96', 'flac 24-196',  # FLACs
-    #'16-44', '16-48', '24-44', '24-48', '24-96', '24-196',  # Also FLACs
-    #'alac',  # ALAC
-    #'aac 256', 'aac 192', 'aac 128',  # AACs with CBR mode
-    #'aac v1', 'aac v2','aac v3', 'aac v4', 'aac v5',  # AACs with VBR mode (5 is best)
-    #'aac v0.1', 'aac v1.0', 'aac v2.0',  # AACs with VBR for built-in aac encoder
-    #'320', '256', '224', '192',  # MP3s with CBR mode
-    #'v0', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7',  'v8',  # MP3s with VBR mode (0 is best)
-    #'256 abr', '224 abr', '192 abr'  # MP3s with ABR mode
-#}
-
-#CODEC_EXTENSIONS = {
-    #'wav'    : '.wav',
-    #'flac'   : '.flac',
-    #'16-48'  : '.flac',
-    #'16-44'  : '.flac',
-    #'alac'   : '.m4a',
-    #'aac 256': '.m4a',
-    #'aac 192': '.m4a',
-    #'aac 128': '.m4a',
-    #'aac v1' : '.m4a',
-    #'aac v2' : '.m4a',
-    #'aac v3' : '.m4a',
-    #'aac v4' : '.m4a',
-    #'aac v5' : '.m4a',
-    #'320'    : '.mp3',
-    #'256'    : '.mp3',
-    #'224'    : '.mp3',
-    #'192'    : '.mp3',
-    #'v0'     : '.mp3',
-    #'v1'     : '.mp3',
-    #'v2'     : '.mp3',
-    #'v3'     : '.mp3',
-    #'v4'     : '.mp3',
-    #'v5'     : '.mp3',
-    #'v6'     : '.mp3',
-    #'v7'     : '.mp3',
-    #'v8'     : '.mp3',
-    #'v9'     : '.mp3',
-#}
-
 
 def resolve_configuration(arg_config_file, config):
     """Implementation for the location of configuration files."""
@@ -327,27 +283,6 @@ def traverse_target(target, config):
                                metacopy_command
                                )
 
-            #A file extension for a lossy format is to be ignored with a warning
-            #if ext in LOSSY_EXT:
-                #print('WARNING: {} is a lossy file and was skipped during transcoding'.format(os.path.join(dirpath, filename)))
-                #continue
-            #for fmt in config['--formats']:
-                #dest_dir = os.path.join(transcode_dirs[fmt], reldir)
-                #if not os.path.exists(dest_dir):
-                    #os.makedirs(dest_dir)
-                #A file extension not recognized as lossy or lossless will be copied
-                #if ext not in LOSSLESS_EXT:
-                    #dest = os.path.abspath(os.path.join(dest_dir, filename))
-                    #command = [COPY, source_file, dest]
-                    #yield Task(command)
-                #else:  # This file will be transcoded
-                    #dest_name = name + CODEC_EXTENSIONS[fmt]
-                    #dest = os.path.abspath(os.path.join(dest_dir, dest_name))
-                    #command = transcode_commands[fmt]
-                    #xcode_command = command_substitute(command, inpt=source_file, outpt=dest)
-                    #yield Task(xcode_command)
-
-
 def iter_targets(config):
     """Iterating over targets"""
     if config['--list-file']:
@@ -390,15 +325,6 @@ def format_destinations(source, config):
         transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
         dest = os.path.join(output_dir, transcode_name)
         mapping[fmt] = dest
-    #fmt_re = re.compile(r'\[(' + '|'.join([codec for codec in CODECS]) + r')\](?!.*\/.*)', flags=re.IGNORECASE)
-    #for fmt in config['--formats']:
-        #dir_has_codec = fmt_re.search(source_name) is not None
-        #if dir_has_codec:
-            #transcode_name = fmt_re.sub('[{}]'.format(fmt.upper()), source_name)
-        #else:
-            #transcode_name = source_name.rstrip() + ' [{}]'.format(fmt.upper())
-        #dest = os.path.join(output_dir, transcode_name)
-        #mapping[fmt] = dest
     return mapping
 
 
