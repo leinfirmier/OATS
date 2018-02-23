@@ -38,14 +38,18 @@ Torrent Options:
 #Non-Standard Libs
 from docopt import docopt
 from . import maketorrent, __version__
+from . import codec
 
 #Standard Libs
+from collections import namedtuple
 from configparser import ConfigParser, ExtendedInterpolation
 from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
 import os
 import platform
+from pprint import pprint
 import re
+import shlex
 import subprocess
 import sys
 
@@ -53,9 +57,13 @@ import sys
 class InvalidConfiguration(Exception):
     pass
 
+class NotSupportedError(Exception):
+    pass
+
 class Task(object):
     def __init__(self, *commands):
         self.commands = commands
+
     def __call__(self):
         for command in self.commands:
             if platform.system() == 'Windows' and command[0] == COPY:
@@ -63,6 +71,8 @@ class Task(object):
             else:
                 shell = False
             try:
+                if shell:
+                    command = ' '.join(shlex.quote(w) for w in command)
                 subprocess.check_call(command,
                                       stdin=subprocess.DEVNULL,
                                       stdout=subprocess.DEVNULL,
@@ -79,8 +89,10 @@ class Task(object):
 
 if platform.system() == 'Windows':
     COPY = 'copy'
+    RM = 'del'
 else:
     COPY = 'cp'
+    RM = 'rm'
 
 AAC_ENCODER = 'aac'
 #To use the Fraunhofer FDK AAC codec library, comment the line above and
@@ -89,95 +101,98 @@ AAC_ENCODER = 'aac'
 #--enable-nonfree during build configuration
 #AAC_ENCODER = 'libfdk_aac'  # To use the Fraunhofer FDK AAC codec library
 
-_ffmpeg = ['ffmpeg', '-threads', '1']
-transcode_commands = {
-    '16-48'  : _ffmpeg + ['-i', '{inpt}', '-c:a', 'flac', '-sample_fmt', 's16', '-ar', '48000', '{outpt}'],
-    '16-44'  : _ffmpeg + ['-i', '{inpt}', '-c:a', 'flac', '-sample_fmt', 's16', '-ar', '44100', '{outpt}'],
-    'alac'   : _ffmpeg + ['-i', '{inpt}', '-c:a', 'alac', '{outpt}'],  # TODO: research  ALAC encoder for options
-    'aac 256': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '256k', '{outpt}'],
-    'aac 192': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '192k', '{outpt}'],
-    'aac 128': _ffmpeg + ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-b:a', '128k', '{outpt}'],
-    '320'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '320k', '-compression_level', '0' ,'{outpt}'],
-    '256'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '256k', '-compression_level', '0' ,'{outpt}'],
-    '224'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '224k', '-compression_level', '0' ,'{outpt}'],
-    '192'    : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '192k', '-compression_level', '0' ,'{outpt}'],
-    'v0'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '0', '-compression_level', '0', '{outpt}'],
-    'v1'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '1', '-compression_level', '0', '{outpt}'],
-    'v2'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '2', '-compression_level', '0', '{outpt}'],
-    'v3'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '3', '-compression_level', '0', '{outpt}'],
-    'v4'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '4', '-compression_level', '0', '{outpt}'],
-    'v5'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '5', '-compression_level', '0', '{outpt}'],
-    'v6'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '6', '-compression_level', '0', '{outpt}'],
-    'v7'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '7', '-compression_level', '0', '{outpt}'],
-    'v8'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '8', '-compression_level', '0', '{outpt}'],
-    'v9'     : _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-q:a', '9', '-compression_level', '0', '{outpt}'],
-    '256 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '256k', '--abr', '1', '-compression_level', '0', '{outpt}'],
-    '224 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '224k', '--abr', '1', '-compression_level', '0', '{outpt}'],
-    '192 abr': _ffmpeg + ['-i', '{inpt}', '-c:a', 'libmp3lame', '-b:a', '192k', '--abr', '1', '-compression_level', '0', '{outpt}'],
-}
 
-if AAC_ENCODER == 'aac':
-    #TODO: Discover what set of aac vbr quality values are actually desirous
-    transcode_commands['aac v0.1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '0.1', '{outpt}']
-    transcode_commands['aac v1.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '1.0', '{outpt}']
-    transcode_commands['aac v2.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-g:a', '2.0', '{outpt}']
-elif AAC_ENCODER == 'libfdk_aac':
-    transcode_commands['aac v1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '1', '{outpt}']
-    transcode_commands['aac v2'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '2', '{outpt}']
-    transcode_commands['aac v3'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '3', '{outpt}']
-    transcode_commands['aac v4'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '4', '{outpt}']
-    transcode_commands['aac v5'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '5', '{outpt}']
-else:
-    raise InvalidConfiguration('Invalid encoder for AAC: {}'.format(AAC_ENCODER))
+ext_codec_full_map = {'.mp3'   : [codec.LAME, codec.FFmpeg],
+                      '.flac'  : [codec.FFmpegFLAC],
+                      '.m4a'   : [codec.FFmpeg],
+                      '.alac'  : [codec.FFmpeg],
+                      '.aac'   : [codec.FFmpeg],
+                      '.opus'  : [codec.FFmpeg],
+                      '.ogg'   : [codec.FFmpeg],
+                      '.vorbis': [codec.FFmpeg],}
+
+ext_codec_map = {}
+for key in ext_codec_full_map:
+    ext_codec_map[key] = [codec for codec in ext_codec_full_map[key] if codec.on_system()]
+
+format_codec_full_map = {
+    'FLAC': [codec.FFmpegFLAC],
+    'MP3' : [codec.LAME, codec.FFmpegMP3],
+    }
+format_codec_map = {}
+for key in format_codec_full_map:
+    format_codec_map[key] = [codec for codec in format_codec_full_map[key] if codec.on_system()]
+
+#pprint(ext_codec_map)
+#pprint(format_codec_map)
+
+# if AAC_ENCODER == 'aac':
+    # #TODO: Discover what set of aac vbr quality values are actually desirous
+    # transcode_commands['aac v0.1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '0.1', '{outpt}']
+    # transcode_commands['aac v1.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '1.0', '{outpt}']
+    # transcode_commands['aac v2.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-g:a', '2.0', '{outpt}']
+# elif AAC_ENCODER == 'libfdk_aac':
+    # transcode_commands['aac v1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '1', '{outpt}']
+    # transcode_commands['aac v2'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '2', '{outpt}']
+    # transcode_commands['aac v3'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '3', '{outpt}']
+    # transcode_commands['aac v4'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '4', '{outpt}']
+    # transcode_commands['aac v5'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '5', '{outpt}']
+# else:
+    # raise InvalidConfiguration('Invalid encoder for AAC: {}'.format(AAC_ENCODER))
 
 #File extension codec classification sets
 #NB: .m4a may contain either lossless or lossy encoding, beware
-LOSSLESS_EXT = {'.flac', '.wav', '.m4a'}
+LOSSLESS_EXT = {'.flac', '.wav', '.m4a', '.alac'}
 LOSSY_EXT = {'.mp3', '.aac', '.opus', '.ogg', '.vorbis'}
+AUDIO_EXTENSIONS = LOSSLESS_EXT.union(LOSSY_EXT)
 
+format_codec_map_full = {
+    'MP3':  [codec.LAME, codec.FFmpegMP3],
+    'FLAC': [codec.FFmpegFLAC],
+}
 #Used for string matching, and should correspond to keys in transcode_commands
-CODECS = {
-    'wav',  # The almighty WAV
-    'flac', 'flac 24bit', 'flac 16-44', 'flac 16-48', 'flac 24-44', 'flac 24-48', 'flac 24-96', 'flac 24-196',  # FLACs
-    '16-44', '16-48', '24-44', '24-48', '24-96', '24-196',  # Also FLACs
-    'alac',  # ALAC
-    'aac 256', 'aac 192', 'aac 128',  # AACs with CBR mode
-    'aac v1', 'aac v2','aac v3', 'aac v4', 'aac v5',  # AACs with VBR mode (5 is best)
-    'aac v0.1', 'aac v1.0', 'aac v2.0',  # AACs with VBR for built-in aac encoder
-    '320', '256', '224', '192',  # MP3s with CBR mode
-    'v0', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7',  'v8',  # MP3s with VBR mode (0 is best)
-    '256 abr', '224 abr', '192 abr'  # MP3s with ABR mode
-}
+#CODECS = {
+    #'wav',  # The almighty WAV
+    #'flac', 'flac 24bit', 'flac 16-44', 'flac 16-48', 'flac 24-44', 'flac 24-48', 'flac 24-96', 'flac 24-196',  # FLACs
+    #'16-44', '16-48', '24-44', '24-48', '24-96', '24-196',  # Also FLACs
+    #'alac',  # ALAC
+    #'aac 256', 'aac 192', 'aac 128',  # AACs with CBR mode
+    #'aac v1', 'aac v2','aac v3', 'aac v4', 'aac v5',  # AACs with VBR mode (5 is best)
+    #'aac v0.1', 'aac v1.0', 'aac v2.0',  # AACs with VBR for built-in aac encoder
+    #'320', '256', '224', '192',  # MP3s with CBR mode
+    #'v0', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7',  'v8',  # MP3s with VBR mode (0 is best)
+    #'256 abr', '224 abr', '192 abr'  # MP3s with ABR mode
+#}
 
-CODEC_EXTENSIONS = {
-    'wav'    : '.wav',
-    'flac'   : '.flac',
-    '16-48'  : '.flac',
-    '16-44'  : '.flac',
-    'alac'   : '.m4a',
-    'aac 256': '.m4a',
-    'aac 192': '.m4a',
-    'aac 128': '.m4a',
-    'aac v1' : '.m4a',
-    'aac v2' : '.m4a',
-    'aac v3' : '.m4a',
-    'aac v4' : '.m4a',
-    'aac v5' : '.m4a',
-    '320'    : '.mp3',
-    '256'    : '.mp3',
-    '224'    : '.mp3',
-    '192'    : '.mp3',
-    'v0'     : '.mp3',
-    'v1'     : '.mp3',
-    'v2'     : '.mp3',
-    'v3'     : '.mp3',
-    'v4'     : '.mp3',
-    'v5'     : '.mp3',
-    'v6'     : '.mp3',
-    'v7'     : '.mp3',
-    'v8'     : '.mp3',
-    'v9'     : '.mp3',
-}
+#CODEC_EXTENSIONS = {
+    #'wav'    : '.wav',
+    #'flac'   : '.flac',
+    #'16-48'  : '.flac',
+    #'16-44'  : '.flac',
+    #'alac'   : '.m4a',
+    #'aac 256': '.m4a',
+    #'aac 192': '.m4a',
+    #'aac 128': '.m4a',
+    #'aac v1' : '.m4a',
+    #'aac v2' : '.m4a',
+    #'aac v3' : '.m4a',
+    #'aac v4' : '.m4a',
+    #'aac v5' : '.m4a',
+    #'320'    : '.mp3',
+    #'256'    : '.mp3',
+    #'224'    : '.mp3',
+    #'192'    : '.mp3',
+    #'v0'     : '.mp3',
+    #'v1'     : '.mp3',
+    #'v2'     : '.mp3',
+    #'v3'     : '.mp3',
+    #'v4'     : '.mp3',
+    #'v5'     : '.mp3',
+    #'v6'     : '.mp3',
+    #'v7'     : '.mp3',
+    #'v8'     : '.mp3',
+    #'v9'     : '.mp3',
+#}
 
 
 def resolve_configuration(arg_config_file, config):
@@ -221,7 +236,7 @@ def initialize_configuration(config):
     """Provides the baseline of configurable options"""
     config['OATS'] = {'--processes': '0',
                       '--output-dir': '.',
-                      '--formats': '320,V0',
+                      '--formats': 'MP3 CBR 320,MP3 VBR 0',
                       '--list-file': 'False',
                       '--torrent': 'False',
                       '--torrent-dir': '.',
@@ -283,25 +298,54 @@ def traverse_target(target, config):
             source_file = os.path.join(target, dirpath, filename)
             reldir = os.path.relpath(dirpath, target)
 
-            #A file extension for a lossy format is to be ignored with a warning
-            if ext in LOSSY_EXT:
-                print('WARNING: {} is a lossy file and was skipped during transcoding'.format(os.path.join(dirpath, filename)))
-                continue
             for fmt in config['--formats']:
                 dest_dir = os.path.join(transcode_dirs[fmt], reldir)
                 if not os.path.exists(dest_dir):
                     os.makedirs(dest_dir)
-                #A file extension not recognized as lossy or lossless will be copied
-                if ext not in LOSSLESS_EXT:
+                if ext not in AUDIO_EXTENSIONS:
                     dest = os.path.abspath(os.path.join(dest_dir, filename))
                     command = [COPY, source_file, dest]
                     yield Task(command)
-                else:  # This file will be transcoded
-                    dest_name = name + CODEC_EXTENSIONS[fmt]
+                else:
+                    decoder = ext_codec_map[ext][0]
+                    encoder = format_codec_map[fmt.type][0]
+                    wav_name = name + '.wav'
+                    wav_dest = os.path.abspath(os.path.join(dest_dir, wav_name))
+                    dest_name = name + encoder.extension
                     dest = os.path.abspath(os.path.join(dest_dir, dest_name))
-                    command = transcode_commands[fmt]
-                    xcode_command = command_substitute(command, inpt=source_file, outpt=dest)
-                    yield Task(xcode_command)
+                    decode_command = decoder.decode(source_file,
+                                                    wav_dest,
+                                                    **encoder.encode_requires())
+                    encode_command = encoder.encode(wav_dest,
+                                                    dest,
+                                                    fmt.subtype)
+                    rm_command = [RM, wav_dest]
+                    metacopy_command = ['metacopy', source_file, dest]
+                    yield Task(decode_command,
+                               encode_command,
+                               rm_command,
+                               metacopy_command
+                               )
+
+            #A file extension for a lossy format is to be ignored with a warning
+            #if ext in LOSSY_EXT:
+                #print('WARNING: {} is a lossy file and was skipped during transcoding'.format(os.path.join(dirpath, filename)))
+                #continue
+            #for fmt in config['--formats']:
+                #dest_dir = os.path.join(transcode_dirs[fmt], reldir)
+                #if not os.path.exists(dest_dir):
+                    #os.makedirs(dest_dir)
+                #A file extension not recognized as lossy or lossless will be copied
+                #if ext not in LOSSLESS_EXT:
+                    #dest = os.path.abspath(os.path.join(dest_dir, filename))
+                    #command = [COPY, source_file, dest]
+                    #yield Task(command)
+                #else:  # This file will be transcoded
+                    #dest_name = name + CODEC_EXTENSIONS[fmt]
+                    #dest = os.path.abspath(os.path.join(dest_dir, dest_name))
+                    #command = transcode_commands[fmt]
+                    #xcode_command = command_substitute(command, inpt=source_file, outpt=dest)
+                    #yield Task(xcode_command)
 
 
 def iter_targets(config):
@@ -327,10 +371,11 @@ def iter_targets(config):
 
 
 def task_caller(task):
-    try:
-        task()
-    except Exception as e:
-        print('ERROR: {}'.format(e))
+    task()
+    #try:
+        #task()
+    #except Exception as e:
+        #print('ERROR: {}'.format(e))
 
 
 def format_destinations(source, config):
@@ -341,15 +386,19 @@ def format_destinations(source, config):
     output_dir = os.path.abspath(config['--output-dir'])
     mapping = {}
     source_name = os.path.basename(os.path.abspath(source))
-    fmt_re = re.compile(r'\[(' + '|'.join([codec for codec in CODECS]) + r')\](?!.*\/.*)', flags=re.IGNORECASE)
     for fmt in config['--formats']:
-        dir_has_codec = fmt_re.search(source_name) is not None
-        if dir_has_codec:
-            transcode_name = fmt_re.sub('[{}]'.format(fmt.upper()), source_name)
-        else:
-            transcode_name = source_name.rstrip() + ' [{}]'.format(fmt.upper())
+        transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
         dest = os.path.join(output_dir, transcode_name)
         mapping[fmt] = dest
+    #fmt_re = re.compile(r'\[(' + '|'.join([codec for codec in CODECS]) + r')\](?!.*\/.*)', flags=re.IGNORECASE)
+    #for fmt in config['--formats']:
+        #dir_has_codec = fmt_re.search(source_name) is not None
+        #if dir_has_codec:
+            #transcode_name = fmt_re.sub('[{}]'.format(fmt.upper()), source_name)
+        #else:
+            #transcode_name = source_name.rstrip() + ' [{}]'.format(fmt.upper())
+        #dest = os.path.join(output_dir, transcode_name)
+        #mapping[fmt] = dest
     return mapping
 
 
@@ -363,13 +412,34 @@ def iter_destinations(config):
             yield v
 
 
+def scan_filetypes(config):
+    """
+    Traverse targets and compose the set of all input audio filetypes.
+    """
+    filetypes = set()
+    for target in config['<target>']:
+        for _dirpath, _dirs, filenames in os.walk(target):
+            for filename in filenames:
+                _name, ext = os.path.splitext(filename)
+                if ext in LOSSLESS_EXT or ext in LOSSY_EXT:
+                    filetypes.add(ext)
+    return filetypes
+
 def main():
     args = docopt(__doc__, version=__version__)
 
     if args['--show-formats']:
-        print('OATS currently has transcode commands for the following format strings')
-        for format in transcode_commands:
-            print(' ' + format.upper())
+        print('The following format strings are available on your system:')
+        formats = set()
+        for key in format_codec_map:
+            for cdc in format_codec_map[key]:
+                for fmt in cdc.formats:
+                    if fmt == '':
+                        formats.add(key)
+                    else:
+                        formats.add(' '.join([key, fmt]))
+        for fmt in sorted(formats):
+            print(' ' + fmt)
         sys.exit(0)
 
     #Set up a ConfigParser object
@@ -396,14 +466,19 @@ def main():
     bconf['--processes'] = None if bconf['--processes'] == '0' else int(bconf['processes'])
     bconf['--source'] = None if bconf['--source'] == 'None' else bconf['--source']
     bconf['--torrent'] = True if bconf['--torrent'].lower() in ['1','t','true'] else False
-    bconf['--formats'] = [fmt.lower() for fmt in bconf['--formats'].split(',')]
     bconf['--list-file'] = True if bconf['--list-file'] in [True, 'true', 'True'] else False
-
-    #Apply a check for format existence in transcode_commands. If it does not
-    #exist there, then OATS does not know how to transcode to it
-    for fmt in bconf['--formats']:
-        if fmt not in transcode_commands:
-            raise InvalidConfiguration('The format "{}" is not known to OATS'.format(fmt))
+    #Normalization of formats into list of namedtuple('Format', ['type', 'subtype'])
+    format_tuple = namedtuple('Format', ['type', 'subtype'])
+    raw_formats = bconf['--formats']
+    bconf['--formats'] = []
+    for raw_format in raw_formats.upper().split(','):
+        if raw_format == '':  # Ignore empty format fields
+            continue
+        try:
+            typ, subtype = raw_format.split(' ', 1)
+        except ValueError:
+            typ, subtype = raw_format, ''
+        bconf['--formats'].append(format_tuple(typ, subtype))
 
     #Make torrent output directory if necessary
     if not os.path.isdir(bconf['--torrent-dir']):
@@ -418,7 +493,25 @@ def main():
             make_torrent(t, bconf['--announce-url'], bconf['--source'], bconf['--torrent-dir'])
         sys.exit(0)
 
-    #Make torrent output directory if necessary
+    #Acquire a complete set of all input audio filetypes
+    input_filetypes = scan_filetypes(bconf)
+    #Check to see if there are any input audio filetypes not currently supported
+    for input_filetype in input_filetypes:
+        if input_filetype not in ext_codec_map:
+            raise NotSupportedError('OATS found an audio filetype it does not (yet) support as input: {}'.format(input_filetype))
+
+    #Determine if any requested formats have no codec tools
+    for fmt in bconf['--formats']:
+        if fmt.type not in format_codec_map:
+            raise InvalidConfiguration('The format of type "{}" is not known to OATS'.format(fmt.type))
+        if not format_codec_map[fmt.type]:  #The list of available codec tools is empty
+            raise InvalidConfiguration('No valid tools for "{}" on the system'.format(fmt.type))
+        else:
+            if fmt.subtype not in format_codec_map[fmt.type][0].formats:
+                print(format_codec_map[fmt.type][0].formats)
+                raise InvalidConfiguration('Codec tool for type "{}" does not recognize subtype "{}"'.format(fmt.type, fmt.subtype))
+
+    #Make output directory if necessary
     if not os.path.isdir(bconf['--output-dir']):
         os.makedirs(bconf['--output-dir'])
 
