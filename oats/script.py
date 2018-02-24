@@ -167,9 +167,9 @@ def get_format_regex():
         if len(subtypes) != 0:
             format_string += '({})?'.format('|'.join(' '+st for st in subtypes))
         format_strings.append(format_string)
-    format_grouping = '({})'.format('|'.join(format_strings))
+    format_grouping = '(?P<format>{})'.format('|'.join(format_strings))
 
-    return re.compile(r'\[(?!.*\[)(.* )?' + format_grouping + r'( .*)?\]')
+    return re.compile(r'\[(?!.*\[)((?P<before>.*) )?' + format_grouping + r'( (?P<after>.*))?\]')
 
 INPUT_FORMAT_REGEX = get_format_regex()
 
@@ -343,24 +343,27 @@ def format_destinations(source, config):
     output_dir = os.path.abspath(config['--output-dir'])
     mapping = {}
     source_name = os.path.basename(os.path.abspath(source))
-    
-    group_num = INPUT_FORMAT_REGEX.groups
+
+    #group_num = INPUT_FORMAT_REGEX.groups
     for fmt in config['--formats']:
         match = INPUT_FORMAT_REGEX.search(source_name)
         if match is not None:
             new_text = ''
-            if match.group(1) is not None:  # Handle text before the format
-                new_text += '[{}]'.format(match.group(1).rstrip())
+            before = match.group('before')
+            _inpt_fmt = match.group('format')
+            after = match.group('after')
+            if before is not None:  # Handle text before the format
+                new_text += '[{}]'.format(before)
             new_text += ' [{}]'.format(str(fmt))  # Handle the format
-            if match.group(group_num) is not None:  # Handle text after the format
-                new_text += ' [{}]'.format(match.group(group_num).lstrip())
+            if after is not None:  # Handle text after the format
+                new_text += ' [{}]'.format(after)
             transcode_name = INPUT_FORMAT_REGEX.sub(new_text, source_name)
         else:
             transcode_name = source_name.rstrip() + ' [{}]'.format(str(fmt))
         dest = os.path.join(output_dir, transcode_name)
         mapping[fmt] = dest
     return mapping
-    
+
     # for fmt in config['--formats']:
         # transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
         # dest = os.path.join(output_dir, transcode_name)
