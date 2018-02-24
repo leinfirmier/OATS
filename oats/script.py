@@ -41,8 +41,8 @@ from . import maketorrent, __version__
 from . import codec
 
 #Standard Libs
-from collections import namedtuple
 from configparser import ConfigParser, ExtendedInterpolation
+from functools import wraps
 from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
 import os
@@ -59,6 +59,24 @@ class InvalidConfiguration(Exception):
 
 class NotSupportedError(Exception):
     pass
+
+class Format(object):
+    def __init__(self, type, subtype):
+        self.type = type
+        self.subtype = subtype
+
+    def __str__(self):
+        if self.subtype == '':
+            return self.type
+        return ' '.join([self.type, self.subtype])
+
+    @classmethod
+    def fromstring(cls, inpt):
+        try:
+            t, s = inpt.split(' ', 1)
+        except ValueError:
+            t, s = inpt, ''
+        return cls(t, s)
 
 class Task(object):
     def __init__(self, *commands):
@@ -123,23 +141,6 @@ format_codec_map = {}
 for key in format_codec_full_map:
     format_codec_map[key] = [codec for codec in format_codec_full_map[key] if codec.on_system()]
 
-#pprint(ext_codec_map)
-#pprint(format_codec_map)
-
-# if AAC_ENCODER == 'aac':
-    # #TODO: Discover what set of aac vbr quality values are actually desirous
-    # transcode_commands['aac v0.1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '0.1', '{outpt}']
-    # transcode_commands['aac v1.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-q:a', '1.0', '{outpt}']
-    # transcode_commands['aac v2.0'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-g:a', '2.0', '{outpt}']
-# elif AAC_ENCODER == 'libfdk_aac':
-    # transcode_commands['aac v1'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '1', '{outpt}']
-    # transcode_commands['aac v2'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '2', '{outpt}']
-    # transcode_commands['aac v3'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '3', '{outpt}']
-    # transcode_commands['aac v4'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '4', '{outpt}']
-    # transcode_commands['aac v5'] = _ffmpeg = ['-i', '{inpt}', '-c:a', AAC_ENCODER, '-vbr', '5', '{outpt}']
-# else:
-    # raise InvalidConfiguration('Invalid encoder for AAC: {}'.format(AAC_ENCODER))
-
 #File extension codec classification sets
 #NB: .m4a may contain either lossless or lossy encoding, beware
 LOSSLESS_EXT = {'.flac', '.wav', '.m4a', '.alac'}
@@ -150,6 +151,27 @@ format_codec_map_full = {
     'MP3':  [codec.LAME, codec.FFmpegMP3],
     'FLAC': [codec.FFmpegFLAC],
 }
+
+def get_format_regex():
+    #Compose the capture grouping for all of the available codecs, note that
+    #this makes use of the full map of codecs
+    format_strings = []
+    for key, codecs in format_codec_full_map.items():
+        format_string = key
+        subtypes = set()
+        for codec in codecs:
+            for fmt in codec.formats:
+                if fmt == '':
+                    continue
+                subtypes.add(fmt)
+        if len(subtypes) != 0:
+            format_string += '({})?'.format('|'.join(' '+st for st in subtypes))
+        format_strings.append(format_string)
+    format_grouping = '({})'.format('|'.join(format_strings))
+
+    return re.compile(r'\[(?!.*\[)(.* )?' + format_grouping + r'( .*)?\]')
+
+INPUT_FORMAT_REGEX = get_format_regex()
 
 def resolve_configuration(arg_config_file, config):
     """Implementation for the location of configuration files."""
@@ -321,11 +343,29 @@ def format_destinations(source, config):
     output_dir = os.path.abspath(config['--output-dir'])
     mapping = {}
     source_name = os.path.basename(os.path.abspath(source))
+    
+    group_num = INPUT_FORMAT_REGEX.groups
     for fmt in config['--formats']:
-        transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
+        match = INPUT_FORMAT_REGEX.search(source_name)
+        if match is not None:
+            new_text = ''
+            if match.group(1) is not None:  # Handle text before the format
+                new_text += '[{}]'.format(match.group(1).rstrip())
+            new_text += ' [{}]'.format(str(fmt))  # Handle the format
+            if match.group(group_num) is not None:  # Handle text after the format
+                new_text += ' [{}]'.format(match.group(group_num).lstrip())
+            transcode_name = INPUT_FORMAT_REGEX.sub(new_text, source_name)
+        else:
+            transcode_name = source_name.rstrip() + ' [{}]'.format(str(fmt))
         dest = os.path.join(output_dir, transcode_name)
         mapping[fmt] = dest
     return mapping
+    
+    # for fmt in config['--formats']:
+        # transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
+        # dest = os.path.join(output_dir, transcode_name)
+        # mapping[fmt] = dest
+    # return mapping
 
 
 def iter_destinations(config):
@@ -351,21 +391,23 @@ def scan_filetypes(config):
                     filetypes.add(ext)
     return filetypes
 
+def available_encode_formats():
+    """
+    Return the set of all formats understood by OATS for encode at runtime.
+    """
+    formats = set()
+    for key in format_codec_map:
+        for cdc in format_codec_map[key]:
+            for fmt in cdc.formats:
+                formats.add(Format(key, fmt))
+    return formats
+
 def main():
     args = docopt(__doc__, version=__version__)
 
     if args['--show-formats']:
-        print('The following format strings are available on your system:')
-        formats = set()
-        for key in format_codec_map:
-            for cdc in format_codec_map[key]:
-                for fmt in cdc.formats:
-                    if fmt == '':
-                        formats.add(key)
-                    else:
-                        formats.add(' '.join([key, fmt]))
-        for fmt in sorted(formats):
-            print(' ' + fmt)
+        print('The following format strings are available for encoding on your system:')
+        print('\n'.join(sorted([str(fmt) for fmt in available_encode_formats()])))
         sys.exit(0)
 
     #Set up a ConfigParser object
@@ -394,17 +436,12 @@ def main():
     bconf['--torrent'] = True if bconf['--torrent'].lower() in ['1','t','true'] else False
     bconf['--list-file'] = True if bconf['--list-file'] in [True, 'true', 'True'] else False
     #Normalization of formats into list of namedtuple('Format', ['type', 'subtype'])
-    format_tuple = namedtuple('Format', ['type', 'subtype'])
     raw_formats = bconf['--formats']
     bconf['--formats'] = []
     for raw_format in raw_formats.upper().split(','):
         if raw_format == '':  # Ignore empty format fields
             continue
-        try:
-            typ, subtype = raw_format.split(' ', 1)
-        except ValueError:
-            typ, subtype = raw_format, ''
-        bconf['--formats'].append(format_tuple(typ, subtype))
+        bconf['--formats'].append(Format.fromstring(raw_format))
 
     #Make torrent output directory if necessary
     if not os.path.isdir(bconf['--torrent-dir']):
