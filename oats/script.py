@@ -402,8 +402,9 @@ def available_encode_formats():
     for key in format_codec_map:
         for cdc in format_codec_map[key]:
             for fmt in cdc.formats:
-                formats.add(Format(key, fmt))
-    return formats
+                formats.add((key, fmt))
+
+    return [Format(t,s) for t, s in formats]
 
 def main():
     args = docopt(__doc__, version=__version__)
