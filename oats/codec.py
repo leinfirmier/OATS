@@ -86,7 +86,7 @@ class LAME(Codec):
         if bit_depth is not None:
             raise ValueError('bit depth decode control not supported by LAME')
         if sample_rate is not None:
-            raise ValueError('sample rate decode control not supported by LAME'
+            raise ValueError('sample rate decode control not supported by LAME')
         command = ['lame', '--decode', inputfile, wavfile]
         return command
 
