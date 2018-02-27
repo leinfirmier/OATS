@@ -84,9 +84,9 @@ class LAME(Codec):
     @classmethod
     def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
         if bit_depth is not None:
-            raise ValueError('bit_depth set on LAME codec which is not supported')
+            raise ValueError('bit depth decode control not supported by LAME')
         if sample_rate is not None:
-            raise ValueError('sample_rate set on LAME codec which is not supported')
+            raise ValueError('sample rate decode control not supported by LAME'
         command = ['lame', '--decode', inputfile, wavfile]
         return command
 
@@ -110,9 +110,9 @@ class FFmpeg(Codec):
         command = ['ffmpeg', '-threads', '1', '-i', inputfile]
         if bit_depth is not None:
             bitdepthmap = {16: 'pcm_s16le', 24: 'pcm_s24le', 32: 'pcm_s32le'}
-            command += ['-c:a', bitdepthmap[decode_opts['bit_depth']]]
+            command += ['-c:a', bitdepthmap['bit_depth']]
         if sample_rate is not None:
-            command += ['-ar', str(decode_opts['sample_rate']),
+            command += ['-ar', str('sample_rate'),
                         '-af', 'aresample=resampler=soxr']
         command += [wavfile]
         return command
@@ -174,3 +174,54 @@ class FFmpegFLAC(FFmpeg):
         else:
             return {}
 
+
+class OpusTools(Codec):
+    depends = 'opusenc'
+    _const = ['--comp', '10']
+    formats = {'VBR 8'   : ['--bitrate', '8', '--vbr', *_const],
+               'VBR 10'  : ['--bitrate', '10', '--vbr', *_const],
+               'VBR 24'  : ['--bitrate', '24', '--vbr', *_const],
+               'VBR 32'  : ['--bitrate', '32', '--vbr', *_const],
+               'VBR 64'  : ['--bitrate', '64', '--vbr', *_const],
+               'VBR 96'  : ['--bitrate', '96', '--vbr', *_const],
+               'VBR 128' : ['--bitrate', '128', '--vbr', *_const],
+               'VBR 256' : ['--bitrate', '256', '--vbr', *_const],
+               'VBR 450' : ['--bitrate', '450', '--vbr', *_const],
+               'VBR 512' : ['--bitrate', '512', '--vbr', *_const],
+               'CBR 8'   : ['--bitrate', '8', '--hard-cbr', *_const],
+               'CBR 10'  : ['--bitrate', '10', '--hard-cbr', *_const],
+               'CBR 24'  : ['--bitrate', '24', '--hard-cbr', *_const],
+               'CBR 32'  : ['--bitrate', '32', '--hard-cbr', *_const],
+               'CBR 64'  : ['--bitrate', '64', '--hard-cbr', *_const],
+               'CBR 96'  : ['--bitrate', '96', '--hard-cbr', *_const],
+               'CBR 128' : ['--bitrate', '128', '--hard-cbr', *_const],
+               'CBR 256' : ['--bitrate', '256', '--hard-cbr', *_const],
+               'CBR 450' : ['--bitrate', '450', '--hard-cbr', *_const],
+               'CBR 512' : ['--bitrate', '512', '--hard-cbr', *_const],
+               'CVBR 8'  : ['--bitrate', '8', '--cvbr', *_const],
+               'CVBR 10' : ['--bitrate', '10', '--cvbr', *_const],
+               'CVBR 24' : ['--bitrate', '24', '--cvbr', *_const],
+               'CVBR 32' : ['--bitrate', '32', '--cvbr', *_const],
+               'CVBR 64' : ['--bitrate', '64', '--cvbr', *_const],
+               'CVBR 96' : ['--bitrate', '96', '--cvbr', *_const],
+               'CVBR 128': ['--bitrate', '128', '--cvbr', *_const],
+               'CVBR 256': ['--bitrate', '256', '--cvbr', *_const],
+               'CVBR 450': ['--bitrate', '450', '--cvbr', *_const],
+               'CVBR 512': ['--bitrate', '512', '--cvbr', *_const],
+               }
+    extension = '.opus'
+
+    @classmethod
+    def encode(cls, wavfile, outfile, fmt):
+        command = ['opusenc', *cls.formats[fmt], wavfile, outfile]
+        return command
+
+    @classmethod
+    def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
+        command = ['opusdec']
+        if sample_rate is not None:
+            command += ['--rate', str(sample_rate)]
+        if bit_depth is not None:
+            raise ValueError('bit depth decode control not supported by opusdec')
+        command += [inputfile, wavfile]
+        return command

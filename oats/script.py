@@ -125,7 +125,7 @@ ext_codec_full_map = {'.mp3'   : [codec.LAME, codec.FFmpeg],
                       '.m4a'   : [codec.FFmpeg],
                       '.alac'  : [codec.FFmpeg],
                       '.aac'   : [codec.FFmpeg],
-                      '.opus'  : [codec.FFmpeg],
+                      '.opus'  : [codec.OpusTools, codec.FFmpeg],
                       '.ogg'   : [codec.FFmpeg],
                       '.vorbis': [codec.FFmpeg],}
 
@@ -136,6 +136,7 @@ for key in ext_codec_full_map:
 format_codec_full_map = {
     'FLAC': [codec.FFmpegFLAC],
     'MP3' : [codec.LAME, codec.FFmpegMP3],
+    'OPUS': [codec.OpusTools]
     }
 format_codec_map = {}
 for key in format_codec_full_map:
@@ -169,7 +170,7 @@ def get_format_regex():
         format_strings.append(format_string)
     format_grouping = '(?P<format>{})'.format('|'.join(format_strings))
 
-    return re.compile(r'\[(?!.*\[)((?P<before>.*) )?' + format_grouping + r'( (?P<after>.*))?\]')
+    return re.compile(r'\[(?!.*\[)((?P<before>.*)[- ])?' + format_grouping + r'([- ](?P<after>.*))?\]', flags=re.IGNORECASE)
 
 INPUT_FORMAT_REGEX = get_format_regex()
 
@@ -353,8 +354,8 @@ def format_destinations(source, config):
             _inpt_fmt = match.group('format')
             after = match.group('after')
             if before is not None:  # Handle text before the format
-                new_text += '[{}]'.format(before)
-            new_text += ' [{}]'.format(str(fmt))  # Handle the format
+                new_text += '[{}] '.format(before)
+            new_text += '[{}]'.format(str(fmt))  # Handle the format
             if after is not None:  # Handle text after the format
                 new_text += ' [{}]'.format(after)
             transcode_name = INPUT_FORMAT_REGEX.sub(new_text, source_name)
