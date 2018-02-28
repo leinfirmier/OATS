@@ -294,7 +294,7 @@ def traverse_target(target, config):
                     dest = os.path.abspath(os.path.join(dest_dir, dest_name))
                     decode_command = decoder.decode(source_file,
                                                     wav_dest,
-                                                    **encoder.encode_requires())
+                                                    **encoder.encode_requires(fmt.subtype))
                     encode_command = encoder.encode(wav_dest,
                                                     dest,
                                                     fmt.subtype)

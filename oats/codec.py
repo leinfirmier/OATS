@@ -42,7 +42,7 @@ class Codec(object):
         raise NotImplementedError
 
     @classmethod
-    def encode_requires(cls):
+    def encode_requires(cls, fmt):
         """
         Passing a format to this method will return a dictionary of parameters
         that must be set for a wavfile in order for successful encoding. Valid
@@ -110,9 +110,9 @@ class FFmpeg(Codec):
         command = ['ffmpeg', '-threads', '1', '-i', inputfile]
         if bit_depth is not None:
             bitdepthmap = {16: 'pcm_s16le', 24: 'pcm_s24le', 32: 'pcm_s32le'}
-            command += ['-c:a', bitdepthmap['bit_depth']]
+            command += ['-c:a', bitdepthmap[bit_depth]]
         if sample_rate is not None:
-            command += ['-ar', str('sample_rate'),
+            command += ['-ar', str(sample_rate),
                         '-af', 'aresample=resampler=soxr']
         command += [wavfile]
         return command
