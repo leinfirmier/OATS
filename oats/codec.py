@@ -119,6 +119,7 @@ class FFmpeg(Codec):
 
 
 class FFmpegMP3(FFmpeg):
+    #0 is the slowest, highest quality compression for libmp3lame
     _const = ['-compression_level', '0']
     formats = {'CBR 320': ['-b:a', '320k', *_const],
                'CBR 256': ['-b:a', '256k', *_const],
@@ -162,8 +163,9 @@ class FFmpegFLAC(FFmpeg):
 
     @classmethod
     def encode(cls, wavfile, outfile, fmt):
+        #12 is the slowest, highest quality compression for flac
         command = ['ffmpeg', '-threads', '1', '-i', wavfile,
-                   '-compression_level', '0',
+                   '-c:a', 'flac', '-compression_level', '12',
                    outfile]
         return command
 
@@ -175,8 +177,51 @@ class FFmpegFLAC(FFmpeg):
             return {}
 
 
+class FFmpegOpus(FFmpeg):
+    #10 is the slowest, highest quality compression for libopus
+    _const = ['-compresson_level', '10']
+    formats = {'VBR 8'   : ['-b:a', '8k', '-vbr', 'on', *_const],
+               'VBR 10'  : ['-b:a', '10k', '-vbr', 'on', *_const],
+               'VBR 24'  : ['-b:a', '24k', '-vbr', 'on', *_const],
+               'VBR 32'  : ['-b:a', '32k', '-vbr', 'on', *_const],
+               'VBR 64'  : ['-b:a', '64k', '-vbr', 'on', *_const],
+               'VBR 96'  : ['-b:a', '96k', '-vbr', 'on', *_const],
+               'VBR 128' : ['-b:a', '128k', '-vbr', 'on', *_const],
+               'VBR 256' : ['-b:a', '256k', '-vbr', 'on', *_const],
+               'VBR 450' : ['-b:a', '450k', '-vbr', 'on', *_const],
+               'VBR 512' : ['-b:a', '512k', '-vbr', 'on', *_const],
+               'CBR 8'   : ['-b:a', '8k', '-vbr', 'off', *_const],
+               'CBR 10'  : ['-b:a', '10k', '-vbr', 'off', *_const],
+               'CBR 24'  : ['-b:a', '24k', '-vbr', 'off', *_const],
+               'CBR 32'  : ['-b:a', '32k', '-vbr', 'off', *_const],
+               'CBR 64'  : ['-b:a', '64k', '-vbr', 'off', *_const],
+               'CBR 96'  : ['-b:a', '96k', '-vbr', 'off', *_const],
+               'CBR 128' : ['-b:a', '128k', '-vbr', 'off', *_const],
+               'CBR 256' : ['-b:a', '256k', '-vbr', 'off', *_const],
+               'CBR 450' : ['-b:a', '450k', '-vbr', 'off', *_const],
+               'CBR 512' : ['-b:a', '512k', '-vbr', 'off', *_const],
+               'CVBR 8'  : ['-b:a', '8k', '-vbr', 'constrained', *_const],
+               'CVBR 10' : ['-b:a', '10k', '-vbr', 'constrained', *_const],
+               'CVBR 24' : ['-b:a', '24k', '-vbr', 'constrained', *_const],
+               'CVBR 32' : ['-b:a', '32k', '-vbr', 'constrained', *_const],
+               'CVBR 64' : ['-b:a', '64k', '-vbr', 'constrained', *_const],
+               'CVBR 96' : ['-b:a', '96k', '-vbr', 'constrained', *_const],
+               'CVBR 128': ['-b:a', '128k', '-vbr', 'constrained', *_const],
+               'CVBR 256': ['-b:a', '256k', '-vbr', 'constrained', *_const],
+               'CVBR 450': ['-b:a', '450k', '-vbr', 'constrained', *_const],
+               'CVBR 512': ['-b:a', '512k', '-vbr', 'constrained', *_const],
+               }
+    extension = '.opus'
+
+    @classmethod
+    def encode(cls, wavfile, outfile, fmt):
+        command = ['opusenc', *cls.formats[fmt], wavfile, outfile]
+        return command
+
+
 class OpusTools(Codec):
     depends = 'opusenc'
+    #10 is the slowest, highest quality compression for opusenc
     _const = ['--comp', '10']
     formats = {'VBR 8'   : ['--bitrate', '8', '--vbr', *_const],
                'VBR 10'  : ['--bitrate', '10', '--vbr', *_const],

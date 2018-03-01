@@ -7,7 +7,7 @@ Usage:
   oats mkconfig [<file>]
   oats mktorrent [options] <target> ...
   oats [options] <target> ...
-  oats (--help | --version | --show-formats)
+  oats (--help | --version | --show-formats | --show-codecs)
 
 Options:
   -c --config=<conf-file>  Specify a configuration file to use.
@@ -19,7 +19,10 @@ Options:
                            for throttling or if autodetection is incorrect.
   -l --list-file           Process targets as list files, each line of the file
                            containing a path to a directory to be transcoded.
-  -F --show-formats        Print out the list of formats known to OATS.
+  -F --show-formats        Print out the list of formats known and available to
+                           OATS on your system.
+  -C --show-codecs         Print out the list of codecs useable by OATS on your
+                           system.
   -h --help                Show this screen.
   -v --version             Show version.
 
@@ -120,12 +123,12 @@ AAC_ENCODER = 'aac'
 #AAC_ENCODER = 'libfdk_aac'  # To use the Fraunhofer FDK AAC codec library
 
 
-ext_codec_full_map = {'.mp3'   : [codec.LAME, codec.FFmpeg],
+ext_codec_full_map = {'.mp3'   : [codec.LAME, codec.FFmpegMP3],
                       '.flac'  : [codec.FFmpegFLAC],
                       '.m4a'   : [codec.FFmpeg],
                       '.alac'  : [codec.FFmpeg],
                       '.aac'   : [codec.FFmpeg],
-                      '.opus'  : [codec.OpusTools, codec.FFmpeg],
+                      '.opus'  : [codec.OpusTools, codec.FFmpegOpus],
                       '.ogg'   : [codec.FFmpeg],
                       '.vorbis': [codec.FFmpeg],}
 
@@ -136,7 +139,7 @@ for key in ext_codec_full_map:
 format_codec_full_map = {
     'FLAC': [codec.FFmpegFLAC],
     'MP3' : [codec.LAME, codec.FFmpegMP3],
-    'OPUS': [codec.OpusTools]
+    'OPUS': [codec.OpusTools, codec.FFmpegOpus],
     }
 format_codec_map = {}
 for key in format_codec_full_map:
@@ -413,6 +416,12 @@ def main():
     if args['--show-formats']:
         print('The following format strings are available for encoding on your system:')
         print('\n'.join(sorted([str(fmt) for fmt in available_encode_formats()])))
+        sys.exit(0)
+
+    if args['--show-codecs']:
+        print('This is the current codec mapping for OATS on your system:')
+        for key, val in format_codec_map.items():
+            print('{}: {}'.format(key, [c.__name__ for c in val]))
         sys.exit(0)
 
     #Set up a ConfigParser object
