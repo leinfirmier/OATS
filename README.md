@@ -28,6 +28,17 @@ named `transcodes`:
 
   `oats --output-dir transcodes --formats "MP3 CBR 320,MP3 VBR 2" Album1 Album2`
 
+## What formats can I use?
+
+The best way to see what audio formats you can use is to enter
+
+  `oats -F`
+
+which will print a list of all available formats on your system. Formats may
+allow parsed arguments which will be described per
+`{name;units:restrictions}`. For instance "MP3 CBR {bitrate;kbps:8-320}"
+indicates that MP3 constant bitrate accepts values in kbps between 8 and 320.
+
 ## Torrent creation options
 
 The following options pertain to torrent creation: `--torrent=<bool>`,
@@ -41,10 +52,10 @@ example of these options is given here.
 OATS is a frontend to a variety of audio codec tools. In its first iteration it
 was just a frontend to FFmpeg, but now is able to modularly use different tools
 and dynamically detect what is available. For instance, if you install LAME on
-your system, and "lame" is a valid environment variable, OATS will attempt to
+your system, and "lame" can be found on the path, OATS will attempt to
 encode your MP3s with it instead of FFmpeg (currently, FFmpeg's Xing header is
-considered deficient in some regards). Similarly, OATS will employ Opus Tools
-`opusenc` and `opusdec` instead of FFmpeg if they are available.
+considered deficient). Similarly, Opus Tools' `opusenc` and `opusdec`, and
+Vorbis Tools' `oggenc` and `oggdec` will be employed over FFmpeg.
 
 FFmpeg provides a good baseline of support for most formats, and you may never
 need anything else. I hope to also add Sound eXchange (SoX) in the future as
@@ -54,7 +65,6 @@ a general tool.
 
  * ALAC support
  * AAC support
- * Vorbis support
  * SoX Codecs
  * Channel Ops?
  * Possibly provide workaround for Windows Powershell tab-completion bug

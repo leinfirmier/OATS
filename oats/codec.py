@@ -3,12 +3,41 @@ import platform
 import subprocess
 import shlex
 
+def sane_int(valstr, valname, minval=None, maxval=None, permitted=None):
+    try:
+        valint = int(valstr)
+    except ValueError:
+        raise ValueError("invalid value for {}, must be integer: '{}'".format(valname, valstr))
+    if minval is not None:
+        if valint < minval:
+            raise ValueError("invalid value for {}: {} is less than minimum {}".format(valname, valint, minval))
+    if maxval is not None:
+        if valint > maxval:
+            raise ValueError("invalid value for {}: {} is more than maximum {}".format(valname, valint, maxval))
+    if permitted is not None:
+        if valint not in permitted:
+            raise ValueError("invalid value for {}: {} is not one of {}".format(valname, valint, permitted))
+    return valint
+
+def sane_float(valstr, valname, minval=None, maxval=None):
+    try:
+        valflt = float(valstr)
+    except ValueError:
+        raise ValueError("invalid value for {}, must be float: '{}'".format(valname, valstr))
+    if minval is not None:
+        if valflt < minval:
+            raise ValueError("invalid value for {}: {} is less than minimum {}".format(valname, valflt, minval))
+    if maxval is not None:
+        if valflt > maxval:
+            raise ValueError("invalid value for {}: {} is more than maximum {}".format(valname, valflt, maxval))
+    return valflt
+
+
 class Codec(object):
     """
     Codec is the base class for the Coder/Decoder tools for OATS.
     """
     depends = '<tool>'  # This should correspond to the command invocation for the underlying tool.
-    formats = {}        # A dictionary mapping format strings to encoding options.
     extension = ''      # The file extension associated with the codec type.
 
     @classmethod
@@ -35,6 +64,10 @@ class Codec(object):
 
         The format string will be used in most but not all cases.
         """
+        return cls._encode(wavfile, outfile, [w.upper() for w in fmt.split(' ')])
+
+    @classmethod
+    def _encode(cls, wavfile, outfile, fmt):
         raise NotImplementedError
 
     @classmethod
@@ -49,37 +82,64 @@ class Codec(object):
         keys in this dictionary are 'bit_depth' and 'sample_rate'. If there are
         no requirements, returns an empty dictionary.
         """
+        return cls._encode_requires([w.upper() for w in fmt.split(' ')])
+
+    @classmethod
+    def _encode_requires(cls, fmt):
         return {}
+
+
+class FFmpeg(Codec):
+    """
+    The FFmpeg class provides a basic decoder implementation.
+    """
+    depends = 'ffmpeg'
+    template = ''
+
+    @classmethod
+    def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
+        command = ['ffmpeg', '-threads', '1', '-i', inputfile]
+        if bit_depth is not None:
+            bitdepthmap = {8: 'pcm_s8le', 16: 'pcm_s16le', 24: 'pcm_s24le', 32: 'pcm_s32le'}
+            command += ['-c:a', bitdepthmap[bit_depth]]
+        if sample_rate is not None:
+            command += ['-ar', str(sample_rate),
+                        '-af', 'aresample=resampler=soxr']
+        command += [wavfile]
+        return command
 
 
 class LAME(Codec):
     depends = 'lame'
-    _const = ['-q', '0', '--noreplaygain']
-    formats = {'CBR 320': ['--cbr', '-b', '320', *_const],
-               'CBR 256': ['--cbr', '-b', '256', *_const],
-               'CBR 224': ['--cbr', '-b', '224', *_const],
-               'CBR 192': ['--cbr', '-b', '192', *_const],
-               'VBR 0'  : ['-V0', '--vbr-new', '-T', *_const],
-               'VBR 1'  : ['-V1', '--vbr-new', '-T', *_const],
-               'VBR 2'  : ['-V2', '--vbr-new', '-T', *_const],
-               'VBR 3'  : ['-V3', '--vbr-new', '-T', *_const],
-               'VBR 4'  : ['-V4', '--vbr-new', '-T', *_const],
-               'VBR 5'  : ['-V5', '--vbr-new', '-T', *_const],
-               'VBR 6'  : ['-V6', '--vbr-new', '-T', *_const],
-               'VBR 7'  : ['-V7', '--vbr-new', '-T', *_const],
-               'VBR 8'  : ['-V8', '--vbr-new', '-T', *_const],
-               'VBR 9'  : ['-V9', '--vbr-new', '-T', *_const],
-               'ABR 256': ['--abr', '256', *_const],
-               'ABR 224': ['--abr', '224', *_const],
-               'ABR 192': ['--abr', '192', *_const],
-               'ABR 128': ['--abr', '128', *_const],
-               }
+    formats = ['CBR \d+',
+               'ABR \d+',
+               'VBR \d']
+    templates = ['CBR {bitrate;kbps:8-320}',
+                 'ABR {bitrate;kbps:8-320}',
+                 'VBR {quality:0-9}']
     extension = '.mp3'
 
     @classmethod
-    def encode(cls, wavfile, outfile, fmt):
-        command = ['lame', *cls.formats[fmt], wavfile, outfile]
-        return command
+    def _encode(cls, wavfile, outfile, fmt):
+        constants = ['-q', '0', '--noreplaygain']
+        #Valid format checks
+        if fmt[0] not in ['VBR', 'CBR', 'ABR']:
+            raise ValueError("LAME expects a format type of CBR, ABR, or VBR: '{}'".format(fmt[0]))
+        if len(fmt) != 2:
+            raise ValueError("LAME expects a bitrate for CBR|ABR, or a quality for VBR: '{}'".format(' '.join(fmt)))
+        #If checks passed, continue to return command lists
+        if fmt[0] == 'CBR':
+            bitrate = sane_int(fmt[1], 'LAME CBR bitrate',
+                               minval=8, maxval=320)
+            return ['lame', '--cbr', '-b', str(bitrate), *constants, wavfile, outfile]
+        elif fmt[0] == 'ABR':
+            bitrate = sane_int(fmt[1], 'LAME ABR bitrate',
+                               minval=8, maxval=320)
+            return ['lame', '--abr', str(bitrate), *constants, wavfile, outfile]
+        elif fmt[0] == 'VBR':
+            quality = sane_int(fmt[1], 'LAME VBR quality',
+                               minval=0, maxval=9)
+            return ['lame', '-V'+str(quality), '--vbr-new', '-T', *constants, wavfile, outfile]
 
     @classmethod
     def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
@@ -91,175 +151,126 @@ class LAME(Codec):
         return command
 
 
-class FFmpeg(Codec):
-    """
-    The FFmpeg class provides a basic decoder implementation.
-    """
-    depends = 'ffmpeg'
-    decode_opts = {''     : {},
-                   '16'   : {'bit_depth': 16},
-                   '24'   : {'bit_depth': 24},
-                   '16-44': {'bit_depth': 16, 'sample_rate': 44100},
-                   '16-48': {'bit_depth': 16, 'sample_rate': 48000},
-                   '24-48': {'bit_depth': 24, 'sample_rate': 48000},
-                   '24-44': {'bit_depth': 24, 'sample_rate': 44100},
-                   }
-
-    @classmethod
-    def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
-        command = ['ffmpeg', '-threads', '1', '-i', inputfile]
-        if bit_depth is not None:
-            bitdepthmap = {16: 'pcm_s16le', 24: 'pcm_s24le', 32: 'pcm_s32le'}
-            command += ['-c:a', bitdepthmap[bit_depth]]
-        if sample_rate is not None:
-            command += ['-ar', str(sample_rate),
-                        '-af', 'aresample=resampler=soxr']
-        command += [wavfile]
-        return command
-
-
 class FFmpegMP3(FFmpeg):
-    #0 is the slowest, highest quality compression for libmp3lame
-    _const = ['-compression_level', '0']
-    formats = {'CBR 320': ['-b:a', '320k', *_const],
-               'CBR 256': ['-b:a', '256k', *_const],
-               'CBR 224': ['-b:a', '224k', *_const],
-               'CBR 192': ['-b:a', '192k', *_const],
-               'VBR 0'  : ['-q:a', '0', *_const],
-               'VBR 1'  : ['-q:a', '1', *_const],
-               'VBR 2'  : ['-q:a', '2', *_const],
-               'VBR 3'  : ['-q:a', '3', *_const],
-               'VBR 4'  : ['-q:a', '4', *_const],
-               'VBR 5'  : ['-q:a', '5', *_const],
-               'VBR 6'  : ['-q:a', '6', *_const],
-               'VBR 7'  : ['-q:a', '7', *_const],
-               'VBR 8'  : ['-q:a', '8', *_const],
-               'VBR 9'  : ['-q:a', '9', *_const],
-               'ABR 256': ['-b:a', '256k', '--abr', '1', *_const],
-               'ABR 224': ['-b:a', '224k', '--abr', '1', *_const],
-               'ABR 192': ['-b:a', '192k', '--abr', '1', *_const],
-               'ABR 128': ['-b:a', '128k', '--abr', '1', *_const],
-               }
+    formats = ['CBR \d+',
+               'ABR \d+',
+               'VBR \d']
+    templates = ['CBR {bitrate;kbps:8-320}',
+                 'ABR {bitrate;kbps:8-320}',
+                 'VBR {quality:0-9}']
     extension='.mp3'
 
     @classmethod
-    def encode(cls, wavfile, outfile, fmt):
-        head = ['ffmpeg', '-threads', '1', '-i']
-        command = [*head , wavfile, '-c:a', 'libmp3lame', *cls.formats[fmt], outfile]
-        return command
+    def _encode(cls, wavfile, outfile, fmt):
+        head = ['ffmpeg', '-threads', '1', '-i', wavfile]
+        #0 is the slowest, highest quality compression for libmp3lame
+        tail = ['-compression_level', '0', outfile]
+        #Valid format checks
+        if fmt[0] not in ['VBR', 'CBR', 'ABR']:
+            raise ValueError("FFmpegMP3 expects a format type of CBR, ABR, or VBR: '{}'".format(fmt[0]))
+        if len(fmt) != 2:
+            raise ValueError("FFmpegMP3 expects a bitrate for CBR|ABR, or a quality for VBR: '{}'".format(' '.join(fmt)))
+
+        #If checks passed, continue to return command lists
+        if fmt[0] == 'CBR':
+            bitrate = sane_int(fmt[1], 'FFmpegMP3 CBR bitrate',
+                               minval=8, maxval=320)
+            return head + ['-b:a', '{}k'.format(bitrate)] + tail
+        elif fmt[0] == 'ABR':
+            bitrate = sane_int(fmt[1], 'FFmpegMP3 ABR bitrate',
+                               minval=8, maxval=320)
+            return head + ['-c:a', 'libmp3lame', '-b:a', '{}k'.format(bitrate), '--abr', '1'] + tail
+        elif fmt[0] == 'VBR':
+            quality = sane_int(fmt[1], 'FFmpegMP3 VBR quality',
+                               minval=0, maxval=9)
+            return head + ['-c:a', 'libmp3lame', '-q:a', str(quality)] + tail
 
 
 class FFmpegFLAC(FFmpeg):
-    formats = {''     : [],
-               '16'   : [],
-               '24'   : [],
-               '16-44': [],
-               '16-48': [],
-               '24-44': [],
-               '24-48': [],
-               }
+    formats = ['\d+[ \-]\d+']
+    templates = ['',
+                 '{bit_depth:8,16,24,32,*} {sample_rate;Hz}']
+    #Common sample rates: 44100, 44000, 88000, 96000
+    #bit depths: 8, 16, 24, 32
     extension='.flac'
     #http://ffmpeg.org/ffmpeg-resampler.html
 
     @classmethod
-    def encode(cls, wavfile, outfile, fmt):
+    def _encode(cls, wavfile, outfile, fmt):
         #12 is the slowest, highest quality compression for flac
-        command = ['ffmpeg', '-threads', '1', '-i', wavfile,
-                   '-c:a', 'flac', '-compression_level', '12',
-                   outfile]
-        return command
+        return ['ffmpeg', '-threads', '1', '-i', wavfile,
+                '-c:a', 'flac', '-compression_level', '12', outfile]
 
     @classmethod
-    def encode_requires(cls, fmt):
-        if fmt in cls.decode_opts:
-            return cls.decode_opts[fmt]
-        else:
-            return {}
+    def _encode_requires(cls, fmt):
+        retdict = {}
+        if len(fmt) == 0:
+            return retdict
+        if len(fmt) != 2:
+            raise ValueError('FFmpegFLAC expects a bit_depth and a sample_rate: {}'.format(fmt))
+        if fmt[0] != '*':
+            retdict['bit_depth'] = sane_int(fmt[0], 'FFmpegFLAC bit_depth',
+                                            permitted=[8,16,24,32])
+        if fmt[1] != '*':
+            retdict['sample_rate'] = sane_int(fmt[1], 'FFmpegFLAC sample_rate')
+        return retdict
 
 
 class FFmpegOpus(FFmpeg):
-    #10 is the slowest, highest quality compression for libopus
-    _const = ['-compresson_level', '10']
-    formats = {'VBR 8'   : ['-b:a', '8k', '-vbr', 'on', *_const],
-               'VBR 10'  : ['-b:a', '10k', '-vbr', 'on', *_const],
-               'VBR 24'  : ['-b:a', '24k', '-vbr', 'on', *_const],
-               'VBR 32'  : ['-b:a', '32k', '-vbr', 'on', *_const],
-               'VBR 64'  : ['-b:a', '64k', '-vbr', 'on', *_const],
-               'VBR 96'  : ['-b:a', '96k', '-vbr', 'on', *_const],
-               'VBR 128' : ['-b:a', '128k', '-vbr', 'on', *_const],
-               'VBR 256' : ['-b:a', '256k', '-vbr', 'on', *_const],
-               'VBR 450' : ['-b:a', '450k', '-vbr', 'on', *_const],
-               'VBR 512' : ['-b:a', '512k', '-vbr', 'on', *_const],
-               'CBR 8'   : ['-b:a', '8k', '-vbr', 'off', *_const],
-               'CBR 10'  : ['-b:a', '10k', '-vbr', 'off', *_const],
-               'CBR 24'  : ['-b:a', '24k', '-vbr', 'off', *_const],
-               'CBR 32'  : ['-b:a', '32k', '-vbr', 'off', *_const],
-               'CBR 64'  : ['-b:a', '64k', '-vbr', 'off', *_const],
-               'CBR 96'  : ['-b:a', '96k', '-vbr', 'off', *_const],
-               'CBR 128' : ['-b:a', '128k', '-vbr', 'off', *_const],
-               'CBR 256' : ['-b:a', '256k', '-vbr', 'off', *_const],
-               'CBR 450' : ['-b:a', '450k', '-vbr', 'off', *_const],
-               'CBR 512' : ['-b:a', '512k', '-vbr', 'off', *_const],
-               'CVBR 8'  : ['-b:a', '8k', '-vbr', 'constrained', *_const],
-               'CVBR 10' : ['-b:a', '10k', '-vbr', 'constrained', *_const],
-               'CVBR 24' : ['-b:a', '24k', '-vbr', 'constrained', *_const],
-               'CVBR 32' : ['-b:a', '32k', '-vbr', 'constrained', *_const],
-               'CVBR 64' : ['-b:a', '64k', '-vbr', 'constrained', *_const],
-               'CVBR 96' : ['-b:a', '96k', '-vbr', 'constrained', *_const],
-               'CVBR 128': ['-b:a', '128k', '-vbr', 'constrained', *_const],
-               'CVBR 256': ['-b:a', '256k', '-vbr', 'constrained', *_const],
-               'CVBR 450': ['-b:a', '450k', '-vbr', 'constrained', *_const],
-               'CVBR 512': ['-b:a', '512k', '-vbr', 'constrained', *_const],
-               }
+    formats = ['CBR \d+',
+               'VBR \d+',
+               'CVBR \d+',
+               ]
+    templates = ['CBR {bitrate;kbps:8-512}',
+                 'VBR {bitrate;kbps:8-512}',
+                 'CVBR {bitrate;kbps:8-512}',
+                 ]
     extension = '.opus'
 
     @classmethod
-    def encode(cls, wavfile, outfile, fmt):
-        command = ['opusenc', *cls.formats[fmt], wavfile, outfile]
-        return command
+    def _encode(cls, wavfile, outfile, fmt):
+        head = ['ffmpeg', '-threads', '1', '-i', wavfile, '-c:a', 'libopus']
+        br_types = {'CBR' : ['-vbr', 'off', '-b:a'],
+                    'VBR' : ['-vbr', 'on', '-b:a'],
+                    'CVBR': ['-vbr', 'constrained', '-b:a']
+                    }
+        #Valid format checks
+        if fmt[0] not in br_types:
+            raise ValueError("FFmpegOpus expects a format type of {}: '{}'".format(', '.join(br_types), fmt[0]))
+        if len(fmt) != 2:
+            raise ValueError("FFmpegOpus expects a bitrate for {}: '{}'".format(fmt[0], ' '.join(fmt)))
+        #If checks passed, continue to return command lists
+        bitrate = sane_int(fmt[1], 'FFmpegOpus bitrate', minval=8, maxval=512)
+        br_type = br_types[fmt[0]]
+        #10 is the slowest, highest quality compression for opusenc
+        return head + br_type + ['{}k'.format(bitrate), '-compresson_level', '10', outfile]
 
 
 class OpusTools(Codec):
     depends = 'opusenc'
-    #10 is the slowest, highest quality compression for opusenc
-    _const = ['--comp', '10']
-    formats = {'VBR 8'   : ['--bitrate', '8', '--vbr', *_const],
-               'VBR 10'  : ['--bitrate', '10', '--vbr', *_const],
-               'VBR 24'  : ['--bitrate', '24', '--vbr', *_const],
-               'VBR 32'  : ['--bitrate', '32', '--vbr', *_const],
-               'VBR 64'  : ['--bitrate', '64', '--vbr', *_const],
-               'VBR 96'  : ['--bitrate', '96', '--vbr', *_const],
-               'VBR 128' : ['--bitrate', '128', '--vbr', *_const],
-               'VBR 256' : ['--bitrate', '256', '--vbr', *_const],
-               'VBR 450' : ['--bitrate', '450', '--vbr', *_const],
-               'VBR 512' : ['--bitrate', '512', '--vbr', *_const],
-               'CBR 8'   : ['--bitrate', '8', '--hard-cbr', *_const],
-               'CBR 10'  : ['--bitrate', '10', '--hard-cbr', *_const],
-               'CBR 24'  : ['--bitrate', '24', '--hard-cbr', *_const],
-               'CBR 32'  : ['--bitrate', '32', '--hard-cbr', *_const],
-               'CBR 64'  : ['--bitrate', '64', '--hard-cbr', *_const],
-               'CBR 96'  : ['--bitrate', '96', '--hard-cbr', *_const],
-               'CBR 128' : ['--bitrate', '128', '--hard-cbr', *_const],
-               'CBR 256' : ['--bitrate', '256', '--hard-cbr', *_const],
-               'CBR 450' : ['--bitrate', '450', '--hard-cbr', *_const],
-               'CBR 512' : ['--bitrate', '512', '--hard-cbr', *_const],
-               'CVBR 8'  : ['--bitrate', '8', '--cvbr', *_const],
-               'CVBR 10' : ['--bitrate', '10', '--cvbr', *_const],
-               'CVBR 24' : ['--bitrate', '24', '--cvbr', *_const],
-               'CVBR 32' : ['--bitrate', '32', '--cvbr', *_const],
-               'CVBR 64' : ['--bitrate', '64', '--cvbr', *_const],
-               'CVBR 96' : ['--bitrate', '96', '--cvbr', *_const],
-               'CVBR 128': ['--bitrate', '128', '--cvbr', *_const],
-               'CVBR 256': ['--bitrate', '256', '--cvbr', *_const],
-               'CVBR 450': ['--bitrate', '450', '--cvbr', *_const],
-               'CVBR 512': ['--bitrate', '512', '--cvbr', *_const],
-               }
+    formats = ['CBR \d+',
+               'VBR \d+',
+               'CVBR \d+',
+               ]
+    templates = ['CBR {bitrate;kbps:8-512}',
+                 'VBR {bitrate;kbps:8-512}',
+                 'CVBR {bitrate;kbps:8-512}',
+                 ]
     extension = '.opus'
 
     @classmethod
-    def encode(cls, wavfile, outfile, fmt):
-        command = ['opusenc', *cls.formats[fmt], wavfile, outfile]
-        return command
+    def _encode(cls, wavfile, outfile, fmt):
+        br_types = {'CBR': '--hard-cbr', 'VBR': '--vbr', 'CVBR': '--cvbr'}
+        #Valid format checks
+        if fmt[0] not in br_types:
+            raise ValueError("OpusTools expects a format type of {}: '{}'".format(', '.join(br_types), fmt[0]))
+        if len(fmt) != 2:
+            raise ValueError("OpusTools expects a bitrate for {}: '{}'".format(fmt[0], ' '.join(fmt)))
+        #If checks passed, continue to return command lists
+        bitrate = sane_int(fmt[1], 'OpusTools bitrate', minval=8, maxval=512)
+        br_type = br_types[fmt[0]]
+        #10 is the slowest, highest quality compression for opusenc
+        return ['opusenc', '--bitrate', str(bitrate), '--comp', '10', br_type, wavfile, outfile]
 
     @classmethod
     def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
@@ -269,4 +280,132 @@ class OpusTools(Codec):
         if bit_depth is not None:
             raise ValueError('bit depth decode control not supported by opusdec')
         command += [inputfile, wavfile]
+        return command
+
+
+class FFmpegVorbis(FFmpeg):
+    depends = 'ffmpeg'
+    formats = ['VBR -?[0-9]+(\.[0-9]{1,2})?',
+               'ABR \d+',
+               'MANAGED (((MAX\d+)|(MIN\d+)|(B\d+))+ ?)+']
+    templates = ['VBR {quality:\-1.0-10.0}',
+                 'ABR {bitrate;kbps:45-500}',
+                 'MANAGED [MAX{max-bitrate;kbps:>=1}] [MIN{min-bitrate;kbps:>=1}] [B{bitrate;kbps:45-500}]']
+    extension = '.vorbis'
+
+    @classmethod
+    def _encode(cls, wavfile, outfile, fmt):
+        br_types = {'ABR', 'VBR', 'MANAGED'}
+        head = ['ffmpeg', '-threads', '1', '-i', wavfile, '-vn', '-c:a', 'libvorbis', '-f', 'ogg']
+        if fmt[0] not in br_types:
+            raise ValueError("FFmpegVorbis expects a format type of {}: '{}'".format(', '.join(br_types), fmt[0]))
+        if fmt[0] == 'VBR':
+            if len(fmt) != 2:
+                raise ValueError("FFmpegVorbis expects a quality value for VBR: '{}'".format(' '.join(fmt)))
+            quality = sane_float(fmt[1], 'FFmpegVorbis quality', minval=-1.0, maxval=10)
+            return head + ['-q', str(quality), outfile]
+        elif fmt[0] == 'ABR':
+            if len(fmt) != 2:
+                raise ValueError("FFmpegVorbis expects a bitrate value for ABR: '{}'".format(' '.join(fmt)))
+            bitrate = sane_int(fmt[1], 'FFmpegVorbis average bitrate', minval=45, maxval=500)
+            return head + ['-b', str(bitrate), outfile]
+        elif fmt[0] == 'MANAGED':
+            command = head
+            maxbitrate, minbitrate, bitrate = None, None, None
+            for word in fmt[1:]:
+                if word.startswith('MAX'):
+                    if maxbitrate is None:
+                        maxbitrate = sane_int(word[3:], 'FFmpegVorbis Managed Max Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Max Bitrate: {}'.format(' '.join(fmt)))
+                elif word.startswith('MIN'):
+                    if minbitrate is None:
+                        minbitrate = sane_int(word[3:], 'FFmpegVorbis Managed Min Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Min Bitrate: {}'.format(' '.join(fmt)))
+                elif word.startswith('B'):
+                    if bitrate is None:
+                        bitrate = sane_int(word[1:], 'FFmpegVorbis Managed Target Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Target Bitrate: {}'.format(' '.join(fmt)))
+                else:
+                    raise ValueError('Unable to parse FFmpegVorbis Managed format: {}'.format(' '.join(fmt)))
+            if maxbitrate is None and minbitrate is None and bitrate is None:
+                print('WARNING: Vorbis Managed Mode with no options: equivalent to VBR 3')
+            if maxbitrate is not None:
+                command += ['-maxrate', str(maxbitrate)]
+            if minbitrate is not None:
+                command += ['-minrate', str(minbitrate)]
+            if bitrate is not None:
+                command += ['-b:a', str(bitrate)]
+            return command + [wavfile]
+
+
+class OggVorbis(Codec):
+    depends = 'oggenc'
+    formats = ['VBR -?[0-9]+(\.[0-9]{1,2})?',
+               'ABR \d+',
+               'MANAGED (((MAX\d+)|(MIN\d+)|(B\d+))+ ?)+']
+    templates = ['VBR {quality:\-1.0-10.0}',
+                 'ABR {bitrate;kbps:45-500}',
+                 'MANAGED [MAX{max-bitrate;kbps:>=1}] [MIN{min-bitrate;kbps:>=1}] [B{bitrate;kbps:45-500}]']
+    extension = '.vorbis'
+
+    @classmethod
+    def _encode(cls, wavfile, outfile, fmt):
+        br_types = {'ABR', 'VBR', 'MANAGED'}
+        if fmt[0] not in br_types:
+            raise ValueError("OggVorbis expects a format type of {}: '{}'".format(', '.join(br_types), fmt[0]))
+        if fmt[0] == 'VBR':
+            if len(fmt) != 2:
+                raise ValueError("OggVorbis expects a quality value for VBR: '{}'".format(' '.join(fmt)))
+            quality = sane_float(fmt[1], 'OggVorbis quality', minval=-1.0, maxval=10)
+            return ['oggenc', '-q', str(quality), '-o', outfile, wavfile]
+        elif fmt[0] == 'ABR':
+            if len(fmt) != 2:
+                raise ValueError("OggVorbis expects a bitrate value for ABR: '{}'".format(' '.join(fmt)))
+            bitrate = sane_int(fmt[1], 'OggVorbis average bitrate', minval=45, maxval=500)
+            return ['oggenc', '-b', str(bitrate), '-o', outfile, wavfile]
+        elif fmt[0] == 'MANAGED':
+            command = ['oggenc', '--managed', '-o', outfile]
+            maxbitrate, minbitrate, bitrate = None, None, None
+            for word in fmt[1:]:
+                if word.startswith('MAX'):
+                    if maxbitrate is None:
+                        maxbitrate = sane_int(word[3:], 'OggVorbis Managed Max Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Max Bitrate: {}'.format(' '.join(fmt)))
+                elif word.startswith('MIN'):
+                    if minbitrate is None:
+                        minbitrate = sane_int(word[3:], 'OggVorbis Managed Min Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Min Bitrate: {}'.format(' '.join(fmt)))
+                elif word.startswith('B'):
+                    if bitrate is None:
+                        bitrate = sane_int(word[1:], 'OggVorbis Managed Target Bitrate', minval=1)
+                    else:
+                        raise ValueError('Duplicate Target Bitrate: {}'.format(' '.join(fmt)))
+                else:
+                    raise ValueError('Unable to parse OggVorbis Managed format: {}'.format(' '.join(fmt)))
+            if maxbitrate is None and minbitrate is None and bitrate is None:
+                print('WARNING: Vorbis Managed Mode with no options: equivalent to VBR 3')
+            if maxbitrate is not None:
+                command += ['--max-bitrate', str(maxbitrate)]
+            if minbitrate is not None:
+                command += ['--min-bitrate', str(minbitrate)]
+            if bitrate is not None:
+                command += ['-b', str(bitrate)]
+            return command + [wavfile]
+
+    @classmethod
+    def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
+        command = ['oggdec']
+        if sample_rate is not None:
+            ValueError('sample rate decode control not supported by oggdec')
+        if bit_depth is not None:
+            if bit_depth not in [8, 16]:
+                raise ValueError('oggdec bit depth decode control only supports 8 or 16 bit')
+            else:
+                command += ['-b', str(bit_depth)]
+        command += ['-o', wavfile, inputfile]
         return command

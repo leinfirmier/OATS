@@ -130,16 +130,17 @@ ext_codec_full_map = {'.mp3'   : [codec.LAME, codec.FFmpegMP3],
                       '.aac'   : [codec.FFmpeg],
                       '.opus'  : [codec.OpusTools, codec.FFmpegOpus],
                       '.ogg'   : [codec.FFmpeg],
-                      '.vorbis': [codec.FFmpeg],}
+                      '.vorbis': [codec.OggVorbis, codec.FFmpegVorbis],}
 
 ext_codec_map = {}
 for key in ext_codec_full_map:
     ext_codec_map[key] = [codec for codec in ext_codec_full_map[key] if codec.on_system()]
 
 format_codec_full_map = {
-    'FLAC': [codec.FFmpegFLAC],
-    'MP3' : [codec.LAME, codec.FFmpegMP3],
-    'OPUS': [codec.OpusTools, codec.FFmpegOpus],
+    'FLAC'  : [codec.FFmpegFLAC],
+    'MP3'   : [codec.LAME, codec.FFmpegMP3],
+    'OPUS'  : [codec.OpusTools, codec.FFmpegOpus],
+    'VORBIS': [codec.OggVorbis, codec.FFmpegVorbis],
     }
 format_codec_map = {}
 for key in format_codec_full_map:
@@ -150,11 +151,6 @@ for key in format_codec_full_map:
 LOSSLESS_EXT = {'.flac', '.wav', '.m4a', '.alac'}
 LOSSY_EXT = {'.mp3', '.aac', '.opus', '.ogg', '.vorbis'}
 AUDIO_EXTENSIONS = LOSSLESS_EXT.union(LOSSY_EXT)
-
-format_codec_map_full = {
-    'MP3':  [codec.LAME, codec.FFmpegMP3],
-    'FLAC': [codec.FFmpegFLAC],
-}
 
 def get_format_regex():
     #Compose the capture grouping for all of the available codecs, note that
@@ -247,25 +243,6 @@ def make_torrent(target, announce_url, source, torrent_dir):
     os.chdir(cwd)
 
 
-def command_substitute(command, **kwargs):
-    """
-    Similar to string formatting with dictionaries and named fields.
-    command_substitute(['foo', '-i', '{bar}'], {'bar': 'baz'}) will return
-    ['foo', '-i', 'baz']
-    """
-    myre = re.compile('\A{(.*)}\B')
-    new_command = []
-    for item in command:
-        try:
-            match = myre.match(item).group(1)
-        except AttributeError:
-            new_command.append(item)
-        else:
-            if match in kwargs:
-                new_command.append(kwargs[match])
-    return new_command
-
-
 def traverse_target(target, config):
     """
     The job of traverse_target is to recursively walk through all of the
@@ -333,10 +310,6 @@ def iter_targets(config):
 
 def task_caller(task):
     task()
-    #try:
-        #task()
-    #except Exception as e:
-        #print('ERROR: {}'.format(e))
 
 
 def format_destinations(source, config):
@@ -368,12 +341,6 @@ def format_destinations(source, config):
         mapping[fmt] = dest
     return mapping
 
-    # for fmt in config['--formats']:
-        # transcode_name = source_name.rstrip() + ' [{} {}]'.format(fmt.type, fmt.subtype)
-        # dest = os.path.join(output_dir, transcode_name)
-        # mapping[fmt] = dest
-    # return mapping
-
 
 def iter_destinations(config):
     """
@@ -398,6 +365,7 @@ def scan_filetypes(config):
                     filetypes.add(ext)
     return filetypes
 
+
 def available_encode_formats():
     """
     Return the set of all formats understood by OATS for encode at runtime.
@@ -405,10 +373,11 @@ def available_encode_formats():
     formats = set()
     for key in format_codec_map:
         for cdc in format_codec_map[key]:
-            for fmt in cdc.formats:
+            for fmt in cdc.templates:
                 formats.add((key, fmt))
 
     return [Format(t,s) for t, s in formats]
+
 
 def main():
     args = docopt(__doc__, version=__version__)
@@ -475,7 +444,7 @@ def main():
     #Check to see if there are any input audio filetypes not currently supported
     for input_filetype in input_filetypes:
         if input_filetype not in ext_codec_map:
-            raise NotSupportedError('OATS found an audio filetype it does not (yet) support as input: {}'.format(input_filetype))
+            raise NotSupportedError('OATS found an audio filetype it does not support as input: {}'.format(input_filetype))
 
     #Determine if any requested formats have no codec tools
     for fmt in bconf['--formats']:
@@ -483,10 +452,6 @@ def main():
             raise InvalidConfiguration('The format of type "{}" is not known to OATS'.format(fmt.type))
         if not format_codec_map[fmt.type]:  #The list of available codec tools is empty
             raise InvalidConfiguration('No valid tools for "{}" on the system'.format(fmt.type))
-        else:
-            if fmt.subtype not in format_codec_map[fmt.type][0].formats:
-                print(format_codec_map[fmt.type][0].formats)
-                raise InvalidConfiguration('Codec tool for type "{}" does not recognize subtype "{}"'.format(fmt.type, fmt.subtype))
 
     #Make output directory if necessary
     if not os.path.isdir(bconf['--output-dir']):
