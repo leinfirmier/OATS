@@ -131,15 +131,15 @@ class LAME(Codec):
         if fmt[0] == 'CBR':
             bitrate = sane_int(fmt[1], 'LAME CBR bitrate',
                                minval=8, maxval=320)
-            return ['lame', '--cbr', '-b', str(bitrate), *constants, wavfile, outfile]
+            return ['lame', '--cbr', '-b', str(bitrate)] + constants + [wavfile, outfile]
         elif fmt[0] == 'ABR':
             bitrate = sane_int(fmt[1], 'LAME ABR bitrate',
                                minval=8, maxval=320)
-            return ['lame', '--abr', str(bitrate), *constants, wavfile, outfile]
+            return ['lame', '--abr', str(bitrate)] + constants + [wavfile, outfile]
         elif fmt[0] == 'VBR':
             quality = sane_int(fmt[1], 'LAME VBR quality',
                                minval=0, maxval=9)
-            return ['lame', '-V'+str(quality), '--vbr-new', '-T', *constants, wavfile, outfile]
+            return ['lame', '-V'+str(quality), '--vbr-new', '-T'] + constants + [wavfile, outfile]
 
     @classmethod
     def decode(cls, inputfile, wavfile, bit_depth=None, sample_rate=None):
